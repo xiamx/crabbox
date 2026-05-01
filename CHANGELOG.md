@@ -11,6 +11,8 @@
 - Added GitHub org membership enforcement before minting browser-login tokens.
 - Added the canonical coordinator endpoint configured for OAuth callback generation.
 - Added Blacksmith Testbox workflow flags for `crabbox warmup` and `crabbox run`, enabling one-command Testbox runs without repo YAML or environment variables.
+- Added AWS runner image management with `crabbox image current`, `image list`, `image create`, and `image promote` so trusted operators can bake and select warmed AMIs.
+- Added configured GitHub Actions hydrate fields through `actions.fields`, with CLI `-f key=value` overrides for repo-specific workflow inputs.
 
 ### Changed
 

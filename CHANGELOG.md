@@ -18,6 +18,7 @@
 - Fixed E2B workspace guardrails so broad roots such as `/`, `/home`, and `/tmp` are rejected before sync creates, deletes, or extracts files.
 - Fixed E2B sandbox creation so unsafe workdirs are rejected before the API call. Thanks @stainlu.
 - Fixed E2B user validation so path-like users are rejected before sandbox or process calls. Thanks @stainlu.
+- Fixed stale Code, WebVNC, and egress bridge clients so expired or missing leases stop polling/restarting after terminal coordinator responses. Thanks @vincentkoc.
 - Fixed `crabbox desktop paste` for terminal windows so symbol-heavy text falls back to direct typing instead of sending a literal `Ctrl+V` into xterm-like sessions.
 - Removed the vulnerable transitive `fast-xml-builder` Worker dependency by updating fast-xml-parser.
 

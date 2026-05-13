@@ -1,27 +1,22 @@
-import { getSandbox, type Sandbox as SandboxInstance } from "@cloudflare/sandbox";
+import { Container, getContainer } from "@cloudflare/containers";
 
-export { Sandbox } from "@cloudflare/sandbox";
+export class Sandbox extends Container {
+  override defaultPort = 8787;
+  override sleepAfter = "30m";
+  override enableInternet = true;
+}
 
 type Env = {
-  Sandbox: DurableObjectNamespace<SandboxInstance>;
+  Sandbox: DurableObjectNamespace<Sandbox>;
   CRABBOX_RUNNER_TOKEN?: string;
 };
-
-type RunnerEvent = {
-  type: "start" | "stdout" | "stderr" | "complete" | "error";
-  data?: string;
-  error?: string;
-  exitCode?: number;
-};
-
-const encoder = new TextEncoder();
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      return json({ ok: true });
+      return json({ ok: true, runner: "cloudflare-container" });
     }
 
     const auth = authorize(request, env);
@@ -62,14 +57,15 @@ async function createSandbox(request: Request, env: Env): Promise<Response> {
   const workdir = cleanAbsolutePath(stringField(body, "workdir") ?? "/workspace/crabbox");
   if (!workdir) return json({ error: "workdir must be an absolute path" }, 400);
 
-  const sandbox = getSandbox(env.Sandbox, sandboxID);
-  const mkdir = await sandbox.exec(`mkdir -p ${shellQuote(workdir)}`, {
-    timeout: 120_000,
-    origin: "internal",
+  const container = getContainer(env.Sandbox, sandboxID);
+  await ensureReady(container);
+  const prepare = await execContainer(container, {
+    command: `mkdir -p ${shellQuote(workdir)}`,
+    cwd: "/",
+    labels: sanitizeLabels(body["labels"]),
+    workdir,
   });
-  if (!mkdir.success) {
-    return json({ error: mkdir.stderr || "failed to prepare sandbox" }, 500);
-  }
+  if (!prepare.ok) return prepare;
 
   return json({
     id: sandboxID,
@@ -83,10 +79,11 @@ async function createSandbox(request: Request, env: Env): Promise<Response> {
 async function getSandboxStatus(env: Env, sandboxID: string): Promise<Response> {
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
-  getSandbox(env.Sandbox, id);
+  const container = getContainer(env.Sandbox, id);
+  const state = await container.getState();
   return json({
     id,
-    state: "running",
+    state: state.status,
     workdir: "/workspace",
   });
 }
@@ -94,8 +91,8 @@ async function getSandboxStatus(env: Env, sandboxID: string): Promise<Response> 
 async function destroySandbox(env: Env, sandboxID: string): Promise<Response> {
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
-  const sandbox = getSandbox(env.Sandbox, id);
-  await sandbox.destroy();
+  const container = getContainer(env.Sandbox, id);
+  await container.destroy();
   return json({ id, state: "stopped" });
 }
 
@@ -111,9 +108,17 @@ async function uploadFile(
   if (!remotePath) return json({ error: "path must be absolute" }, 400);
   if (!request.body) return json({ error: "request body is required" }, 400);
 
-  const sandbox = getSandbox(env.Sandbox, id);
-  await sandbox.writeFile(remotePath, request.body);
-  return json({ id, path: remotePath });
+  const container = getContainer(env.Sandbox, id);
+  await ensureReady(container);
+  const uploadURL = new URL("http://container/v1/files");
+  uploadURL.searchParams.set("path", remotePath);
+  return container.containerFetch(uploadURL, {
+    method: "POST",
+    body: request.body,
+    headers: {
+      "Content-Type": "application/octet-stream",
+    },
+  });
 }
 
 async function execStream(request: Request, env: Env, sandboxID: string): Promise<Response> {
@@ -127,52 +132,38 @@ async function execStream(request: Request, env: Env, sandboxID: string): Promis
   const cwd = cleanAbsolutePath(stringField(body, "cwd") ?? "/workspace/crabbox");
   if (!cwd) return json({ error: "cwd must be an absolute path" }, 400);
 
-  const rawTimeout = numberField(body, "timeoutMs");
-  const timeout = rawTimeout && rawTimeout > 0 ? rawTimeout : undefined;
-  const envVars = sanitizeEnv(body["env"]);
-  const sandbox = getSandbox(env.Sandbox, id);
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller): Promise<void> {
-      return writeExecEvents(controller, sandbox, command, cwd, envVars, timeout);
-    },
+  const container = getContainer(env.Sandbox, id);
+  await ensureReady(container);
+  return execContainer(container, {
+    command,
+    cwd,
+    env: sanitizeEnv(body["env"]),
+    timeoutMs: numberField(body, "timeoutMs"),
   });
+}
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson",
-      "Cache-Control": "no-store",
+async function ensureReady(container: DurableObjectStub<Sandbox>): Promise<void> {
+  await container.startAndWaitForPorts({
+    ports: 8787,
+    cancellationOptions: {
+      instanceGetTimeoutMS: 120_000,
+      portReadyTimeoutMS: 120_000,
+      waitInterval: 1_000,
     },
   });
 }
 
-async function writeExecEvents(
-  controller: ReadableStreamDefaultController<Uint8Array>,
-  sandbox: SandboxInstance,
-  command: string,
-  cwd: string,
-  envVars: Record<string, string> | undefined,
-  timeout: number | undefined,
-): Promise<void> {
-  try {
-    writeEvent(controller, { type: "start" });
-    const result = await sandbox.exec(command, {
-      cwd,
-      ...(envVars ? { env: envVars } : {}),
-      ...(timeout ? { timeout } : {}),
-    });
-    if (result.stdout) {
-      writeEvent(controller, { type: "stdout", data: result.stdout });
-    }
-    if (result.stderr) {
-      writeEvent(controller, { type: "stderr", data: result.stderr });
-    }
-    writeEvent(controller, { type: "complete", exitCode: result.exitCode });
-  } catch (error: unknown) {
-    writeEvent(controller, { type: "error", error: errorMessage(error) });
-  } finally {
-    controller.close();
-  }
+async function execContainer(
+  container: DurableObjectStub<Sandbox>,
+  payload: Record<string, unknown>,
+): Promise<Response> {
+  return container.containerFetch("http://container/v1/exec", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 }
 
 function authorize(request: Request, env: Env): Response | null {
@@ -182,13 +173,6 @@ function authorize(request: Request, env: Env): Response | null {
   const actual = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
   if (actual !== expected) return json({ error: "unauthorized" }, 401);
   return null;
-}
-
-function writeEvent(
-  controller: ReadableStreamDefaultController<Uint8Array>,
-  event: RunnerEvent,
-): void {
-  controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 }
 
 async function readObject(request: Request): Promise<Record<string, unknown>> {
@@ -250,8 +234,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -88,6 +88,12 @@ func (b *coordinatorLeaseBackend) releaseStaleCoordinatorLeaseForRetry(leaseID s
 	releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := b.coord.ReleaseLease(releaseCtx, leaseID, true); err != nil {
+		// A missing coordinator record means there is nothing left to discard.
+		// Treat it as cleaned so acquire can retry with a new lease id.
+		if isCoordinatorNotFoundError(err) {
+			fmt.Fprintf(b.rt.Stderr, "stale coordinator lease %s was already gone; retrying with fresh lease\n", leaseID)
+			return true
+		}
 		fmt.Fprintf(b.rt.Stderr, "warning: release failed after stale coordinator instance for %s; not retrying: %v\n", leaseID, err)
 		return false
 	}

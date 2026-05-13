@@ -172,7 +172,7 @@ func TestCoordinatorAcquireReleasesStaleInstanceLease(t *testing.T) {
 	}
 }
 
-func TestCoordinatorAcquireDoesNotRetryStaleInstanceWhenReleaseMissing(t *testing.T) {
+func TestCoordinatorAcquireRetriesStaleInstanceWhenReleaseMissing(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
@@ -182,6 +182,10 @@ func TestCoordinatorAcquireDoesNotRetryStaleInstanceWhenReleaseMissing(t *testin
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/leases":
 			creates++
+			if creates > 1 {
+				http.Error(w, `{"error":"capacity exhausted after retry"}`, http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, `{"error":"InvalidInstanceID.NotFound: instance disappeared"}`, http.StatusInternalServerError)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/release"):
 			releases++
@@ -205,17 +209,17 @@ func TestCoordinatorAcquireDoesNotRetryStaleInstanceWhenReleaseMissing(t *testin
 	backend := &coordinatorLeaseBackend{cfg: cfg, coord: coord, rt: Runtime{Stderr: &stderr}}
 
 	_, err = backend.Acquire(context.Background(), AcquireRequest{})
-	if err == nil || !strings.Contains(err.Error(), "InvalidInstanceID.NotFound") {
+	if err == nil || !strings.Contains(err.Error(), "capacity exhausted after retry") {
 		t.Fatalf("err=%v", err)
 	}
-	if creates != 1 {
-		t.Fatalf("creates=%d want 1", creates)
+	if creates != 2 {
+		t.Fatalf("creates=%d want 2", creates)
 	}
 	if releases != 1 {
 		t.Fatalf("releases=%d want 1", releases)
 	}
-	if !strings.Contains(stderr.String(), "not retrying") {
-		t.Fatalf("missing no-retry warning: %q", stderr.String())
+	if !strings.Contains(stderr.String(), "already gone; retrying with fresh lease") {
+		t.Fatalf("missing retry warning: %q", stderr.String())
 	}
 }
 

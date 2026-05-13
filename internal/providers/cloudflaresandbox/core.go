@@ -21,6 +21,7 @@ type LeaseView = core.LeaseView
 type StatusRequest = core.StatusRequest
 type StatusView = core.StatusView
 type StopRequest = core.StopRequest
+type CleanupRequest = core.CleanupRequest
 type Server = core.Server
 type Repo = core.Repo
 type SyncManifest = core.SyncManifest

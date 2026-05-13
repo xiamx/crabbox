@@ -215,6 +215,9 @@ func (b *cloudflareSandboxBackend) Status(ctx context.Context, req StatusRequest
 		}
 		view := sandboxStatusView(leaseID, slug, sandbox)
 		if !req.Wait || view.Ready {
+			if cloudflareSandboxTerminalState(view.State) {
+				removeLeaseClaim(leaseID)
+			}
 			return view, nil
 		}
 		if b.now().After(deadline) {
@@ -242,6 +245,49 @@ func (b *cloudflareSandboxBackend) Stop(ctx context.Context, req StopRequest) er
 	}
 	removeLeaseClaim(leaseID)
 	fmt.Fprintf(b.rt.Stdout, "stopped %s provider=%s sandbox=%s\n", leaseID, providerName, sandboxID)
+	return nil
+}
+
+func (b *cloudflareSandboxBackend) Cleanup(ctx context.Context, req CleanupRequest) error {
+	client, err := newCloudflareSandboxClient(b.cfg, b.rt)
+	if err != nil {
+		return err
+	}
+	claims, err := localCloudflareSandboxClaims()
+	if err != nil {
+		return err
+	}
+	removed := 0
+	for _, claim := range claims {
+		sandbox, err := client.getSandbox(ctx, claim.LeaseID)
+		if err != nil {
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+				if req.DryRun {
+					fmt.Fprintf(b.rt.Stdout, "would remove stale cloudflare-sandbox claim %s slug=%s reason=not-found\n", claim.LeaseID, blank(claim.Slug, "-"))
+					continue
+				}
+				removeLeaseClaim(claim.LeaseID)
+				removed++
+				fmt.Fprintf(b.rt.Stdout, "removed stale cloudflare-sandbox claim %s slug=%s reason=not-found\n", claim.LeaseID, blank(claim.Slug, "-"))
+				continue
+			}
+			fmt.Fprintf(b.rt.Stderr, "warning: cloudflare-sandbox status failed for %s: %v\n", claim.LeaseID, err)
+			continue
+		}
+		if !cloudflareSandboxTerminalState(sandbox.State) {
+			continue
+		}
+		if req.DryRun {
+			fmt.Fprintf(b.rt.Stdout, "would remove stale cloudflare-sandbox claim %s slug=%s state=%s\n", claim.LeaseID, blank(claim.Slug, "-"), sandbox.State)
+			continue
+		}
+		removeLeaseClaim(claim.LeaseID)
+		removed++
+		fmt.Fprintf(b.rt.Stdout, "removed stale cloudflare-sandbox claim %s slug=%s state=%s\n", claim.LeaseID, blank(claim.Slug, "-"), sandbox.State)
+	}
+	if !req.DryRun {
+		fmt.Fprintf(b.rt.Stdout, "cloudflare-sandbox cleanup removed=%d checked=%d\n", removed, len(claims))
+	}
 	return nil
 }
 
@@ -386,7 +432,16 @@ func claimToServer(claim localClaim, state string) Server {
 
 func cloudflareSandboxReady(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", "running", "ready", "started", "active", "unknown":
+	case "", "running", "ready", "started", "active", "healthy", "unknown":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloudflareSandboxTerminalState(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "expired", "stopped", "stopped_with_code", "destroyed", "not_found", "not-found":
 		return true
 	default:
 		return false

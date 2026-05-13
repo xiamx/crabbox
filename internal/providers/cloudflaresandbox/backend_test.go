@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,6 +40,12 @@ func TestBuildCloudflareSandboxCommandQuotesArgv(t *testing.T) {
 	want := "'node' '-e' 'console.log('\\''ok'\\'')'"
 	if got != want {
 		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestCloudflareSandboxHealthyStateIsReady(t *testing.T) {
+	if !cloudflareSandboxReady("healthy") {
+		t.Fatal("healthy state should be ready")
 	}
 }
 
@@ -94,5 +101,87 @@ func TestCloudflareSandboxClientExecStream(t *testing.T) {
 func TestDurationCeil(t *testing.T) {
 	if got := durationMillisecondsCeil(1500 * time.Microsecond); got != 2 {
 		t.Fatalf("durationMillisecondsCeil = %d, want 2", got)
+	}
+}
+
+func TestCloudflareSandboxStatusPrunesExpiredClaim(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sandboxes/cbx_expired" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"id":"cbx_expired","state":"expired","workdir":"/workspace/repo"}`)
+	}))
+	defer server.Close()
+
+	if err := claimLeaseForRepoProvider("cbx_expired", "blue-lobster", providerName, t.TempDir(), time.Hour, false); err != nil {
+		t.Fatal(err)
+	}
+	backend := cloudflareSandboxBackend{
+		cfg: Config{
+			Provider: providerName,
+			CloudflareSandbox: CloudflareSandboxConfig{
+				APIURL: server.URL,
+				Token:  "token",
+			},
+		},
+		rt: Runtime{HTTP: server.Client()},
+	}
+	view, err := backend.Status(context.Background(), StatusRequest{ID: "blue-lobster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.State != "expired" {
+		t.Fatalf("state = %q, want expired", view.State)
+	}
+	if _, ok, err := resolveLeaseClaimForProvider("blue-lobster", providerName); err != nil || ok {
+		t.Fatalf("claim resolved after expired status ok=%t err=%v", ok, err)
+	}
+}
+
+func TestCloudflareSandboxCleanupPrunesTerminalClaims(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/sandboxes/cbx_expired":
+			_, _ = fmt.Fprint(w, `{"id":"cbx_expired","state":"expired","workdir":"/workspace/repo"}`)
+		case "/v1/sandboxes/cbx_running":
+			_, _ = fmt.Fprint(w, `{"id":"cbx_running","state":"running","workdir":"/workspace/repo"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	repo := t.TempDir()
+	if err := claimLeaseForRepoProvider("cbx_expired", "blue-lobster", providerName, repo, time.Hour, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := claimLeaseForRepoProvider("cbx_running", "green-lobster", providerName, repo, time.Hour, false); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	backend := cloudflareSandboxBackend{
+		cfg: Config{
+			Provider: providerName,
+			CloudflareSandbox: CloudflareSandboxConfig{
+				APIURL: server.URL,
+				Token:  "token",
+			},
+		},
+		rt: Runtime{HTTP: server.Client(), Stdout: &stdout},
+	}
+	if err := backend.Cleanup(context.Background(), CleanupRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := resolveLeaseClaimForProvider("blue-lobster", providerName); err != nil || ok {
+		t.Fatalf("expired claim resolved after cleanup ok=%t err=%v", ok, err)
+	}
+	if _, ok, err := resolveLeaseClaimForProvider("green-lobster", providerName); err != nil || !ok {
+		t.Fatalf("running claim missing after cleanup ok=%t err=%v", ok, err)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("removed=1 checked=2")) {
+		t.Fatalf("cleanup output = %q, want removed summary", stdout.String())
 	}
 }

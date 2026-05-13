@@ -75,13 +75,23 @@ printf '%s' "$CRABBOX_CLOUDFLARE_SANDBOX_TOKEN" \
   of the local checkout, extracts it into `workdir`, and relays command output
   and exit status back to the CLI.
 - `warmup` creates the sandbox and prepares the workdir. Warmed sandboxes remain
-  alive until `crabbox stop`.
+  alive until `crabbox stop` or the configured TTL/idle deadline expires.
 - `status` and `stop` resolve Crabbox's local claim and call the runner.
 - `list` reports local Cloudflare Sandbox claims. Cloudflare does not expose a
   global Sandbox listing API through the runner.
 - The container image includes common repo-test tools such as Git, GitHub CLI,
   `jq`, `ripgrep`, Node, and `pnpm`; project-specific dependencies still belong
   to the repo's own setup commands.
+- Warmed sandboxes keep their container filesystem between commands while the
+  lease is active. Use that as the provider's cache layer for cloned
+  repositories, package stores, and generated setup state.
+- The runner stores lease metadata in the Container Durable Object and schedules
+  cleanup at the earlier of `--ttl` or `--idle-timeout`. Activity on file upload
+  or command execution extends the idle deadline. When the deadline passes, the
+  runner destroys the container and marks the lease expired.
+- `crabbox cleanup --provider cloudflare-sandbox` cannot discover every remote
+  container, but it checks local Cloudflare Sandbox claims and removes entries
+  whose runner state is expired, stopped, or missing.
 
 ## Limitations
 

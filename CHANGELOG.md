@@ -12,6 +12,7 @@
 ### Fixed
 
 - Fixed AWS Windows WSL2 exact `--type` requests so instance families without nested virtualization fail before leasing with a targeted repair hint.
+- Fixed coordinator-backed AWS acquisition so readiness failures delete the just-created instance before retrying, while CLI retries still require an explicit cleanup signal.
 - Fixed `crabbox run --preflight --preflight-tools none` so it prints only the workspace summary without running remote probes.
 - Fixed native Windows `crabbox run --preflight` so user and cwd diagnostics are always printed alongside configurable tool probes.
 - Fixed native Windows `--script` and `--env-from-profile` uploads so non-ASCII PowerShell source and profile values stay UTF-8 under Windows PowerShell.

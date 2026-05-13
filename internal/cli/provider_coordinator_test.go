@@ -113,3 +113,160 @@ func TestCoordinatorListJSONFallsBackWhenAdminTokenMissing(t *testing.T) {
 		t.Fatalf("leases=%#v", leases)
 	}
 }
+
+func TestCoordinatorAcquireReleasesStaleInstanceLease(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var createdLeaseID string
+	releases := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/leases":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			createdLeaseID, _ = body["leaseID"].(string)
+			http.Error(w, `{"error":"InvalidInstanceID.NotFound: instance disappeared"}`, http.StatusInternalServerError)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/release"):
+			releases++
+			if createdLeaseID == "" || !strings.Contains(r.URL.Path, createdLeaseID) {
+				t.Fatalf("release path=%s created=%s", r.URL.Path, createdLeaseID)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"lease": CoordinatorLease{
+				ID:       createdLeaseID,
+				Provider: "aws",
+				State:    "released",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := baseConfig()
+	cfg.Provider = "aws"
+	cfg.TargetOS = targetLinux
+	cfg.Coordinator = server.URL
+	cfg.CoordToken = "user-token"
+	coord, _, err := newCoordinatorClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	backend := &coordinatorLeaseBackend{cfg: cfg, coord: coord, rt: Runtime{Stderr: &stderr}}
+
+	_, err = backend.acquireOnce(context.Background(), false)
+	if err == nil || !strings.Contains(err.Error(), "InvalidInstanceID.NotFound") {
+		t.Fatalf("err=%v", err)
+	}
+	if !isCoordinatorStaleInstanceCleanedError(err) {
+		t.Fatalf("err=%T, want cleaned stale instance wrapper", err)
+	}
+	if releases != 1 {
+		t.Fatalf("releases=%d want 1", releases)
+	}
+	if !strings.Contains(stderr.String(), "discarded stale coordinator lease") {
+		t.Fatalf("missing discard warning: %q", stderr.String())
+	}
+}
+
+func TestCoordinatorAcquireDoesNotRetryStaleInstanceWhenReleaseMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	creates := 0
+	releases := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/leases":
+			creates++
+			http.Error(w, `{"error":"InvalidInstanceID.NotFound: instance disappeared"}`, http.StatusInternalServerError)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/release"):
+			releases++
+			http.Error(w, `{"error":"lease not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := baseConfig()
+	cfg.Provider = "aws"
+	cfg.TargetOS = targetLinux
+	cfg.Coordinator = server.URL
+	cfg.CoordToken = "user-token"
+	coord, _, err := newCoordinatorClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	backend := &coordinatorLeaseBackend{cfg: cfg, coord: coord, rt: Runtime{Stderr: &stderr}}
+
+	_, err = backend.Acquire(context.Background(), AcquireRequest{})
+	if err == nil || !strings.Contains(err.Error(), "InvalidInstanceID.NotFound") {
+		t.Fatalf("err=%v", err)
+	}
+	if creates != 1 {
+		t.Fatalf("creates=%d want 1", creates)
+	}
+	if releases != 1 {
+		t.Fatalf("releases=%d want 1", releases)
+	}
+	if !strings.Contains(stderr.String(), "not retrying") {
+		t.Fatalf("missing no-retry warning: %q", stderr.String())
+	}
+}
+
+func TestCoordinatorAcquireWrapsWorkerCleanupSignalWithoutRelease(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	creates := 0
+	releases := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/leases":
+			creates++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			http.Error(w, `{"error":"InvalidInstanceID.NotFound: instance disappeared; crabbox_aws_stale_instance_cleaned; deleted AWS instance i-stale after readiness failure"}`, http.StatusInternalServerError)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/release"):
+			releases++
+			http.Error(w, `{"error":"lease not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := baseConfig()
+	cfg.Provider = "aws"
+	cfg.TargetOS = targetLinux
+	cfg.Coordinator = server.URL
+	cfg.CoordToken = "user-token"
+	cfg.AWSSSHCIDRs = []string{"0.0.0.0/0"}
+	coord, _, err := newCoordinatorClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	backend := &coordinatorLeaseBackend{cfg: cfg, coord: coord, rt: Runtime{Stderr: &stderr}}
+
+	_, err = backend.acquireOnce(context.Background(), false)
+	if err == nil || !strings.Contains(err.Error(), "InvalidInstanceID.NotFound") {
+		t.Fatalf("err=%v", err)
+	}
+	if !isCoordinatorStaleInstanceCleanedError(err) {
+		t.Fatalf("err=%T, want cleaned stale instance wrapper", err)
+	}
+	if creates != 1 {
+		t.Fatalf("creates=%d want 1", creates)
+	}
+	if releases != 0 {
+		t.Fatalf("releases=%d want 0", releases)
+	}
+}

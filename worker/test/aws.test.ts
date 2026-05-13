@@ -11,6 +11,8 @@ import {
   awsQuotaPreflightAttempt,
   awsRegionCandidates,
   createSecurityGroupParams,
+  isAWSInstanceCleanedAfterReadinessFailure,
+  isAWSInstanceNotFoundError,
 } from "../src/aws";
 
 describe("aws provider", () => {
@@ -67,6 +69,38 @@ describe("aws provider", () => {
     ).toBe("policy");
     expect(awsProvisioningErrorCategory("InsufficientInstanceCapacity: nope")).toBe("capacity");
     expect(awsProvisioningErrorCategory("VcpuLimitExceeded: nope")).toBe("quota");
+  });
+
+  it("classifies stale AWS instance ID errors", () => {
+    expect(isAWSInstanceNotFoundError("InvalidInstanceID.NotFound: The instance ID does not exist"))
+      .toBe(true);
+    expect(
+      isAWSInstanceNotFoundError(
+        "<Error><Code>InvalidInstanceID.NotFound</Code><Message>missing</Message></Error>",
+      ),
+    ).toBe(true);
+    expect(isAWSInstanceNotFoundError("UnauthorizedOperation: nope")).toBe(false);
+  });
+
+  it("treats missing stale AWS instance cleanup as cleaned", () => {
+    expect(
+      isAWSInstanceCleanedAfterReadinessFailure(
+        "InvalidInstanceID.NotFound: instance disappeared",
+        "InvalidInstanceID.NotFound: instance disappeared",
+      ),
+    ).toBe(true);
+    expect(
+      isAWSInstanceCleanedAfterReadinessFailure(
+        "InvalidInstanceID.NotFound: instance disappeared",
+        "",
+      ),
+    ).toBe(true);
+    expect(
+      isAWSInstanceCleanedAfterReadinessFailure(
+        "timed out waiting for AWS instance public IP",
+        "UnauthorizedOperation: denied",
+      ),
+    ).toBe(false);
   });
 
   it("adds a small policy fallback for class requests but not exact types", () => {

@@ -841,6 +841,56 @@ func TestAcquireAttemptsRetriesWarmupBootstrapFailures(t *testing.T) {
 	}
 }
 
+func TestAcquireAttemptsDoesNotRetryUnconfirmedCoordinatorStaleInstanceFailures(t *testing.T) {
+	var stderr strings.Builder
+	attempts := 0
+	_, err := acquireAttemptsRetry(Runtime{Stderr: &stderr}, false, func() (LeaseTarget, error) {
+		attempts++
+		return LeaseTarget{}, CoordinatorHTTPError{
+			Method:     "POST",
+			Path:       "/v1/leases",
+			StatusCode: 500,
+			Message:    `{"error":"InvalidInstanceID.NotFound"}`,
+		}
+	})
+	if err == nil {
+		t.Fatal("expected stale instance error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts=%d want 1", attempts)
+	}
+	if strings.Contains(stderr.String(), "retrying with fresh lease") {
+		t.Fatalf("unexpected retry warning: %q", stderr.String())
+	}
+}
+
+func TestAcquireAttemptsRetriesCleanedCoordinatorStaleInstanceFailures(t *testing.T) {
+	var stderr strings.Builder
+	attempts := 0
+	lease, err := acquireAttemptsRetry(Runtime{Stderr: &stderr}, false, func() (LeaseTarget, error) {
+		attempts++
+		if attempts == 1 {
+			err := CoordinatorHTTPError{
+				Method:     "POST",
+				Path:       "/v1/leases",
+				StatusCode: 500,
+				Message:    `{"error":"InvalidInstanceID.NotFound"}`,
+			}
+			return LeaseTarget{}, coordinatorStaleInstanceCleanedError{err: err}
+		}
+		return LeaseTarget{LeaseID: "cbx_ok"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || lease.LeaseID != "cbx_ok" {
+		t.Fatalf("attempts=%d lease=%#v", attempts, lease)
+	}
+	if !strings.Contains(stderr.String(), "coordinator returned stale instance") {
+		t.Fatalf("missing stale retry warning: %q", stderr.String())
+	}
+}
+
 func TestBootstrapWaitTimeoutExtendsForDesktopBrowser(t *testing.T) {
 	if got := bootstrapWaitTimeout(Config{}); got != 20*time.Minute {
 		t.Fatalf("plain bootstrap timeout=%s want 20m", got)

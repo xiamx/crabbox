@@ -4,6 +4,7 @@ import {
   EC2SpotClient,
   awsProvisioningErrorCategory,
   awsRegionCandidates,
+  isAWSInstanceCleanedAfterReadinessFailure,
   isRetryableAWSProvisioningError,
 } from "./aws";
 import { AzureClient } from "./azure";
@@ -4864,8 +4865,29 @@ class AWSProvider implements CloudProvider {
           slug,
           owner,
         );
-        // oxlint-disable-next-line eslint/no-await-in-loop -- wait on the region that created the instance.
-        const readyServer = await client.waitForServerIP(server.cloudID);
+        let readyServer: ProviderMachine;
+        try {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- wait on the region that created the instance.
+          readyServer = await client.waitForServerIP(server.cloudID);
+        } catch (error) {
+          const waitMessage = error instanceof Error ? error.message : String(error);
+          try {
+            // oxlint-disable-next-line eslint/no-await-in-loop -- clean up the exact instance before any fallback.
+            await client.deleteServer(server.cloudID);
+          } catch (deleteError) {
+            const deleteMessage = deleteError instanceof Error ? deleteError.message : String(deleteError);
+            if (!isAWSInstanceCleanedAfterReadinessFailure(waitMessage, deleteMessage)) {
+              throw new Error(
+                `${waitMessage}; cleanup failed for AWS instance ${server.cloudID}: ${deleteMessage}`,
+                { cause: deleteError },
+              );
+            }
+          }
+          throw new Error(
+            `${waitMessage}; crabbox_aws_stale_instance_cleaned; deleted AWS instance ${server.cloudID} after readiness failure`,
+            { cause: error },
+          );
+        }
         const result: {
           server: ProviderMachine;
           serverType: string;

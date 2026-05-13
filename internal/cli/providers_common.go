@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -98,10 +99,35 @@ func acquireAttemptsRetry(rt Runtime, keep bool, acquire func() (LeaseTarget, er
 			return lease, nil
 		}
 		lastErr = err
-		if attempt == attempts || !isBootstrapWaitError(err) {
+		if attempt == attempts || !isRetryableAcquireError(err) {
 			return LeaseTarget{}, err
 		}
-		fmt.Fprintf(rt.Stderr, "warning: bootstrap failed; retrying with fresh lease: %v\n", err)
+		if isCoordinatorStaleInstanceCleanedError(err) {
+			fmt.Fprintf(rt.Stderr, "warning: coordinator returned stale instance; retrying with fresh lease: %v\n", err)
+		} else {
+			fmt.Fprintf(rt.Stderr, "warning: bootstrap failed; retrying with fresh lease: %v\n", err)
+		}
 	}
 	return LeaseTarget{}, lastErr
+}
+
+func isRetryableAcquireError(err error) bool {
+	return isBootstrapWaitError(err) || isCoordinatorStaleInstanceCleanedError(err)
+}
+
+type coordinatorStaleInstanceCleanedError struct {
+	err error
+}
+
+func (e coordinatorStaleInstanceCleanedError) Error() string {
+	return e.err.Error()
+}
+
+func (e coordinatorStaleInstanceCleanedError) Unwrap() error {
+	return e.err
+}
+
+func isCoordinatorStaleInstanceCleanedError(err error) bool {
+	var cleaned coordinatorStaleInstanceCleanedError
+	return errors.As(err, &cleaned)
 }

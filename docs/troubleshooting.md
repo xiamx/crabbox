@@ -127,6 +127,11 @@ Brokered responses also include `capacityHints` so callers can surface the
 selected region/market and next operator action instead of parsing provider
 errors.
 
+If AWS reports `InvalidInstanceID.NotFound` during coordinator-backed lease
+creation, the backing instance record was stale by the time Crabbox tried to use
+it. Crabbox discards that lease record best-effort and retries once with a
+fresh lease.
+
 ## Provider Machine Looks Orphaned
 
 Symptoms:

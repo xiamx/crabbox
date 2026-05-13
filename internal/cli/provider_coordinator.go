@@ -40,6 +40,12 @@ func (b *coordinatorLeaseBackend) acquireOnce(ctx context.Context, keep bool) (L
 	fmt.Fprintf(b.rt.Stderr, "coordinator lease class=%s preferred_type=%s keep=%v slug=%s idle_timeout=%s ttl=%s\n", cfg.Class, cfg.ServerType, keep, slug, cfg.IdleTimeout, cfg.TTL)
 	lease, err := b.coord.CreateLease(ctx, cfg, publicKey, keep, leaseID, slug)
 	if err != nil {
+		if isCoordinatorStaleInstanceCleanedSignal(err) {
+			return LeaseTarget{}, coordinatorStaleInstanceCleanedError{err: err}
+		}
+		if isCoordinatorStaleInstanceError(err) && b.releaseStaleCoordinatorLeaseForRetry(leaseID) {
+			return LeaseTarget{}, coordinatorStaleInstanceCleanedError{err: err}
+		}
 		return LeaseTarget{}, err
 	}
 	if lease.ID != "" && lease.ID != leaseID {
@@ -76,6 +82,33 @@ func (b *coordinatorLeaseBackend) acquireOnce(ctx context.Context, keep bool) (L
 	}
 	target = bootstrapTarget
 	return LeaseTarget{Server: server, SSH: target, LeaseID: leaseID, Coordinator: b.coord}, nil
+}
+
+func (b *coordinatorLeaseBackend) releaseStaleCoordinatorLeaseForRetry(leaseID string) bool {
+	releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := b.coord.ReleaseLease(releaseCtx, leaseID, true); err != nil {
+		fmt.Fprintf(b.rt.Stderr, "warning: release failed after stale coordinator instance for %s; not retrying: %v\n", leaseID, err)
+		return false
+	}
+	fmt.Fprintf(b.rt.Stderr, "discarded stale coordinator lease %s\n", leaseID)
+	return true
+}
+
+func isCoordinatorStaleInstanceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "InvalidInstanceID.NotFound")
+}
+
+func isCoordinatorStaleInstanceCleanedSignal(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "crabbox_aws_stale_instance_cleaned") && isCoordinatorStaleInstanceError(err)
 }
 
 func (b *coordinatorLeaseBackend) Resolve(ctx context.Context, req ResolveRequest) (LeaseTarget, error) {

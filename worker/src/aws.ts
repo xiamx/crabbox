@@ -857,6 +857,20 @@ export function isRetryableAWSProvisioningError(message: string): boolean {
   return awsProvisioningErrorCategory(message) !== "";
 }
 
+export function isAWSInstanceNotFoundError(message: string): boolean {
+  return message.includes("InvalidInstanceID.NotFound");
+}
+
+export function isAWSInstanceCleanedAfterReadinessFailure(
+  waitMessage: string,
+  cleanupMessage: string,
+): boolean {
+  if (cleanupMessage === "") {
+    return true;
+  }
+  return isAWSInstanceNotFoundError(waitMessage) && isAWSInstanceNotFoundError(cleanupMessage);
+}
+
 function trimBody(text: string): string {
   return text.length > 500 ? `${text.slice(0, 500)}...` : text;
 }

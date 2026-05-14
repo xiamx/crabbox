@@ -43,6 +43,8 @@ func (p Provider) Configure(cfg core.Config, rt core.Runtime) (core.Backend, err
 	}
 	if normalized, ok := core.NormalizeCloudflareContainerInstanceType(cfg.ServerType); ok {
 		cfg.ServerType = normalized
+	} else if !cfg.ServerTypeExplicit {
+		cfg.ServerType = core.CloudflareContainerInstanceTypeForClass(cfg.Class)
 	} else {
 		return nil, core.Exit(2, "cloudflare --type must be one of %s", strings.Join(core.CloudflareContainerInstanceTypes(), ", "))
 	}

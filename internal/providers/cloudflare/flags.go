@@ -27,7 +27,10 @@ func ApplyCloudflareProviderFlags(cfg *Config, fs *flag.FlagSet, values any) err
 		}
 		normalized, ok := normalizeCloudflareContainerInstanceType(instanceType)
 		if !ok {
-			return exit(2, "%s --type must be one of %s", providerName, strings.Join(cloudflareContainerInstanceTypes(), ", "))
+			if flagWasSet(fs, "type") || cfg.ServerTypeExplicit {
+				return exit(2, "%s --type must be one of %s", providerName, strings.Join(cloudflareContainerInstanceTypes(), ", "))
+			}
+			normalized = cloudflareContainerInstanceTypeForClass(cfg.Class)
 		}
 		cfg.ServerType = normalized
 		cfg.ServerTypeExplicit = flagWasSet(fs, "type") || cfg.ServerTypeExplicit

@@ -70,7 +70,10 @@ func newCloudflareClient(cfg Config, rt Runtime) (*cloudflareClient, error) {
 	}
 	instanceType, ok := normalizeCloudflareContainerInstanceType(blank(cfg.ServerType, cloudflareContainerInstanceTypeForClass(cfg.Class)))
 	if !ok {
-		return nil, exit(2, "%s --type must be one of %s", providerName, strings.Join(cloudflareContainerInstanceTypes(), ", "))
+		if cfg.ServerTypeExplicit {
+			return nil, exit(2, "%s --type must be one of %s", providerName, strings.Join(cloudflareContainerInstanceTypes(), ", "))
+		}
+		instanceType = cloudflareContainerInstanceTypeForClass(cfg.Class)
 	}
 	parsed, err := url.Parse(apiURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {

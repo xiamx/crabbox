@@ -2605,6 +2605,14 @@ export class FleetDurableObject implements DurableObject {
     }
     try {
       const server = await this.awsLeaseServer(lease);
+      if (isAWSTerminalInstanceState(server.status)) {
+        return {
+          ...audit,
+          cloudStatus: "missing",
+          cloudState: server.status,
+          message: `aws instance is ${server.status}`,
+        };
+      }
       return {
         ...audit,
         cloudStatus: "found",
@@ -3697,6 +3705,10 @@ function isCloudNotFoundError(message: string): boolean {
     lower.includes("invalidinstanceid.notfound") ||
     lower.includes("does not exist")
   );
+}
+
+function isAWSTerminalInstanceState(state: string): boolean {
+  return state === "shutting-down" || state === "terminated";
 }
 
 function isAdminRoute(method: string, parts: string[]): boolean {

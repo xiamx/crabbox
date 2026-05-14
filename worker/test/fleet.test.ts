@@ -3025,6 +3025,18 @@ describe("fleet identity", () => {
       }),
     );
     storage.seed(
+      "lease:cbx_000000000004",
+      testLease({
+        id: "cbx_000000000004",
+        slug: "terminated-runner",
+        provider: "aws",
+        cloudID: "i-terminated",
+        region: "eu-west-1",
+        state: "expired",
+        createdAt: "2026-05-01T00:02:00.000Z",
+      }),
+    );
+    storage.seed(
       "lease:cbx_000000000003",
       testLease({
         id: "cbx_000000000003",
@@ -3046,7 +3058,7 @@ describe("fleet identity", () => {
           cloudID: id,
           region: "eu-west-1",
           name: `crabbox-${id}`,
-          status: "running",
+          status: id === "i-terminated" ? "terminated" : "running",
           serverType: "c7i.2xlarge",
           host: "192.0.2.20",
           labels: {},
@@ -3064,6 +3076,7 @@ describe("fleet identity", () => {
       audits: Array<{ leaseID: string; cloudStatus: string; cloudState?: string }>;
     };
     expect(body.audits).toMatchObject([
+      { leaseID: "cbx_000000000004", cloudStatus: "missing", cloudState: "terminated" },
       { leaseID: "cbx_000000000002", cloudStatus: "missing" },
       { leaseID: "cbx_000000000001", cloudStatus: "found", cloudState: "running" },
     ]);

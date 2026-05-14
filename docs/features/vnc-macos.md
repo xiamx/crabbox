@@ -38,6 +38,10 @@ macos username: ec2-user
 macos password: ...
 ```
 
+`crabbox screenshot` captures the same Screen Sharing/VNC framebuffer used by
+WebVNC. It does not use `screencapture`, which is not reliable from EC2 Mac
+non-interactive SSH sessions.
+
 AWS EC2 Mac has a provider-level lifecycle constraint: Mac instances run on
 allocated Dedicated Hosts with a 24-hour minimum host allocation period.
 Crabbox launches onto a host id you provide; it does not allocate, scrub, or

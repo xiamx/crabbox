@@ -1123,6 +1123,8 @@ func TestServerTypeForProviderClassDirectProviders(t *testing.T) {
 		{provider: "islo", class: "beast", want: ""},
 		{provider: "e2b", class: "beast", want: "base"},
 		{provider: "daytona", class: "beast", want: "snapshot"},
+		{provider: "cloudflare", class: "standard", want: "standard-1"},
+		{provider: "cf", class: "beast", want: "standard-4"},
 		{provider: "azure", class: "standard", want: "Standard_D32ads_v6"},
 		{provider: "google", class: "standard", want: "c4-standard-32"},
 		{provider: "google-cloud", class: "standard", want: "c4-standard-32"},

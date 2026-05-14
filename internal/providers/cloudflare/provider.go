@@ -2,6 +2,7 @@ package cloudflare
 
 import (
 	"flag"
+	"strings"
 
 	core "github.com/openclaw/crabbox/internal/cli"
 )
@@ -37,5 +38,13 @@ func (Provider) ApplyFlags(cfg *core.Config, fs *flag.FlagSet, values any) error
 }
 
 func (p Provider) Configure(cfg core.Config, rt core.Runtime) (core.Backend, error) {
+	if cfg.ServerType == "" {
+		cfg.ServerType = core.CloudflareContainerInstanceTypeForClass(cfg.Class)
+	}
+	if normalized, ok := core.NormalizeCloudflareContainerInstanceType(cfg.ServerType); ok {
+		cfg.ServerType = normalized
+	} else {
+		return nil, core.Exit(2, "cloudflare --type must be one of %s", strings.Join(core.CloudflareContainerInstanceTypes(), ", "))
+	}
 	return NewCloudflareBackend(p.Spec(), cfg, rt), nil
 }

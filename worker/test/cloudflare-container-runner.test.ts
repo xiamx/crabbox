@@ -89,6 +89,7 @@ vi.mock("@cloudflare/containers", () => ({
 const { default: worker, Sandbox } = await import("../src/cloudflare-container-runner");
 
 type CapturedInternalRequest = {
+  binding?: string;
   id?: string;
   request?: Request;
 };
@@ -96,19 +97,26 @@ type CapturedInternalRequest = {
 function envWithCapturedInternalRequest(
   capture: CapturedInternalRequest,
 ): Parameters<typeof worker.fetch>[1] {
+  const binding = (name: string) => ({
+    get(id: string) {
+      capture.binding = name;
+      capture.id = id;
+      return {
+        async fetch(request: Request): Promise<Response> {
+          capture.request = request;
+          return Response.json({ ok: true });
+        },
+      };
+    },
+  });
   return {
     CRABBOX_RUNNER_TOKEN: "runner-token",
-    Sandbox: {
-      get(id: string) {
-        capture.id = id;
-        return {
-          async fetch(request: Request): Promise<Response> {
-            capture.request = request;
-            return Response.json({ ok: true });
-          },
-        };
-      },
-    },
+    Sandbox: binding("Sandbox"),
+    SandboxLite: binding("SandboxLite"),
+    SandboxBasic: binding("SandboxBasic"),
+    SandboxStandard1: binding("SandboxStandard1"),
+    SandboxStandard2: binding("SandboxStandard2"),
+    SandboxStandard3: binding("SandboxStandard3"),
   } as Parameters<typeof worker.fetch>[1];
 }
 
@@ -171,6 +179,7 @@ describe("Cloudflare runner lifecycle", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(capture.binding).toBe("Sandbox");
     expect(capture.id).toBe("cbx_test");
     expect(capture.request?.headers.get("Authorization")).toBeNull();
     expect(capture.request?.headers.get("Content-Type")).toBe("application/json");
@@ -180,21 +189,53 @@ describe("Cloudflare runner lifecycle", () => {
     await expect(capture.request.json()).resolves.toMatchObject({
       id: "cbx_test",
       workdir: "/workspace/repo",
+      instanceType: "standard-4",
       labels: { repo: "my-app" },
+    });
+  });
+
+  it("routes requested instance types to the matching durable object binding", async () => {
+    const capture: CapturedInternalRequest = {};
+    const response = await worker.fetch(
+      new Request("https://runner.example/v1/sandboxes", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer runner-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: "cbx_test",
+          workdir: "/workspace/repo",
+          instanceType: "standard-2",
+        }),
+      }),
+      envWithCapturedInternalRequest(capture),
+    );
+
+    expect(response.status).toBe(200);
+    expect(capture.binding).toBe("SandboxStandard2");
+    if (capture.request === undefined) {
+      throw new Error("missing captured request");
+    }
+    await expect(capture.request.json()).resolves.toMatchObject({
+      instanceType: "standard-2",
     });
   });
 
   it("does not forward edge auth headers to durable object proxy requests", async () => {
     const capture: CapturedInternalRequest = {};
     const response = await worker.fetch(
-      new Request("https://runner.example/v1/sandboxes/cbx_test/exec-stream", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer runner-token",
-          "Content-Type": "application/json",
+      new Request(
+        "https://runner.example/v1/sandboxes/cbx_test/exec-stream?instanceType=standard-4",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer runner-token",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ command: "echo hi", cwd: "/workspace/repo" }),
         },
-        body: JSON.stringify({ command: "echo hi", cwd: "/workspace/repo" }),
-      }),
+      ),
       envWithCapturedInternalRequest(capture),
     );
 

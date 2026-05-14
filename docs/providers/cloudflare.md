@@ -80,10 +80,11 @@ printf '%s' "$CRABBOX_CLOUDFLARE_RUNNER_TOKEN" \
       --config worker/wrangler.cloudflare.jsonc
 ```
 
-The checked-in runner config uses the `standard-4` container instance type so
-agent test workloads have the largest predefined disk budget. Cloudflare
-Containers tie disk to the instance type; reduce `instance_type` only for small
-smoke-test runners, or use a custom instance type when the account allows it.
+The checked-in runner config defines one Durable Object binding per predefined
+Cloudflare container instance type. Crabbox maps `--class standard|fast|large|beast`
+to `standard-1|standard-2|standard-3|standard-4`; `beast` is the default and has
+the largest predefined disk budget. Use `--type lite|basic|standard-1|standard-2|standard-3|standard-4`
+to pin a specific Cloudflare type.
 
 Check the active container app after deploy:
 
@@ -155,9 +156,9 @@ crabbox stop --provider cloudflare <lease-id>
 - `--fresh-pr` is not supported for delegated archive sync.
 - `--checksum` is not supported because the provider uses archive upload and
   extraction instead of Crabbox rsync.
-- Container size and concurrency are controlled by
-  `worker/wrangler.cloudflare.jsonc`. Choose an `instance_type` and
-  `max_instances` that match the account's Cloudflare Containers limits.
+- Container size classes are controlled by the bindings in
+  `worker/wrangler.cloudflare.jsonc`. Choose `max_instances` values that match
+  the account's Cloudflare Containers limits.
 - Cloudflare can roll container changes separately from Worker script changes.
   Use `npm run deploy:cloudflare --prefix worker` or pass
   `--containers-rollout=immediate` when running Wrangler directly.

@@ -14,6 +14,12 @@ import (
 
 func NewCloudflareBackend(spec ProviderSpec, cfg Config, rt Runtime) Backend {
 	cfg.Provider = providerName
+	if cfg.ServerType == "" {
+		cfg.ServerType = cloudflareContainerInstanceTypeForClass(cfg.Class)
+	}
+	if normalized, ok := normalizeCloudflareContainerInstanceType(cfg.ServerType); ok {
+		cfg.ServerType = normalized
+	}
 	return &cloudflareBackend{spec: spec, cfg: cfg, rt: rt}
 }
 
@@ -300,11 +306,12 @@ func (b *cloudflareBackend) createSandbox(ctx context.Context, client *cloudflar
 		return "", cloudflareContainer{}, "", err
 	}
 	labels := map[string]string{
-		"crabbox":  "true",
-		"provider": providerName,
-		"lease":    leaseID,
-		"slug":     slug,
-		"repo":     repo.Name,
+		"crabbox":       "true",
+		"provider":      providerName,
+		"lease":         leaseID,
+		"slug":          slug,
+		"repo":          repo.Name,
+		"instance_type": b.cfg.ServerType,
 	}
 	sandbox, err := client.createSandbox(ctx, createSandboxRequest{
 		ID:                 leaseID,
@@ -312,6 +319,7 @@ func (b *cloudflareBackend) createSandbox(ctx context.Context, client *cloudflar
 		Slug:               slug,
 		Repo:               repo.Name,
 		Workdir:            workdir,
+		InstanceType:       b.cfg.ServerType,
 		TTLSeconds:         durationSecondsCeil(b.cfg.TTL),
 		IdleTimeoutSeconds: durationSecondsCeil(b.cfg.IdleTimeout),
 		Labels:             labels,
@@ -388,7 +396,7 @@ func sandboxStatusView(leaseID, slug string, sandbox cloudflareContainer) Status
 		TargetOS:   targetLinux,
 		State:      server.Status,
 		ServerID:   sandbox.ID,
-		ServerType: providerName,
+		ServerType: server.ServerType.Name,
 		Network:    networkPublic,
 		Ready:      cloudflareReady(server.Status),
 		Labels:     server.Labels,
@@ -405,7 +413,9 @@ func sandboxToServer(leaseID, slug string, sandbox cloudflareContainer) Server {
 	labels["slug"] = blank(slug, newLeaseSlug(leaseID))
 	labels["target"] = targetLinux
 	state := blank(sandbox.State, "running")
+	instanceType := blank(sandbox.InstanceType, providerName)
 	labels["state"] = state
+	labels["instance_type"] = instanceType
 	server := Server{
 		Provider: providerName,
 		CloudID:  sandbox.ID,
@@ -413,7 +423,7 @@ func sandboxToServer(leaseID, slug string, sandbox cloudflareContainer) Server {
 		Status:   state,
 		Labels:   labels,
 	}
-	server.ServerType.Name = providerName
+	server.ServerType.Name = instanceType
 	return server
 }
 

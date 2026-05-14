@@ -21,12 +21,16 @@ func RegisterCloudflareProviderFlags(fs *flag.FlagSet, defaults Config) any {
 
 func ApplyCloudflareProviderFlags(cfg *Config, fs *flag.FlagSet, values any) error {
 	if isCloudflareProviderName(cfg.Provider) {
-		if flagWasSet(fs, "class") {
-			return exit(2, "--class is not supported for provider=%s", providerName)
+		instanceType := strings.TrimSpace(cfg.ServerType)
+		if instanceType == "" {
+			instanceType = cloudflareContainerInstanceTypeForClass(cfg.Class)
 		}
-		if flagWasSet(fs, "type") {
-			return exit(2, "--type is not supported for provider=%s", providerName)
+		normalized, ok := normalizeCloudflareContainerInstanceType(instanceType)
+		if !ok {
+			return exit(2, "%s --type must be one of %s", providerName, strings.Join(cloudflareContainerInstanceTypes(), ", "))
 		}
+		cfg.ServerType = normalized
+		cfg.ServerTypeExplicit = flagWasSet(fs, "type") || cfg.ServerTypeExplicit
 	}
 	v, ok := values.(cloudflareFlagValues)
 	if !ok {

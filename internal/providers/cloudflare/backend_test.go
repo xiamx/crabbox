@@ -86,6 +86,39 @@ func TestCloudflareFlagsApply(t *testing.T) {
 	}
 }
 
+func TestCloudflareCreateSandboxSendsInstanceType(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var got createSandboxRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sandboxes" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode create request: %v", err)
+		}
+		_, _ = fmt.Fprintf(w, `{"id":%q,"state":"running","workdir":%q,"instanceType":%q}`, got.ID, got.Workdir, got.InstanceType)
+	}))
+	defer server.Close()
+
+	cfg := Config{Provider: providerName, Class: "fast"}
+	cfg.ServerType = cloudflareContainerInstanceTypeForClass(cfg.Class)
+	cfg.Cloudflare.APIURL = server.URL
+	cfg.Cloudflare.Token = "token"
+	rt := Runtime{HTTP: server.Client()}
+	backend := NewCloudflareBackend(Provider{}.Spec(), cfg, rt).(*cloudflareBackend)
+	client, err := newCloudflareClient(cfg, rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := backend.createSandbox(context.Background(), client, Repo{Name: "my-app", Root: t.TempDir()}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got.InstanceType != "standard-2" {
+		t.Fatalf("instance type = %q, want standard-2", got.InstanceType)
+	}
+}
+
 func TestCloudflarePrepareWorkspacePreservesWhenRequested(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -165,16 +198,28 @@ func TestCloudflareRemoteDiskCheckRejectsSmallContainer(t *testing.T) {
 	}
 }
 
-func TestCloudflareAliasRejectsResourceFlags(t *testing.T) {
-	cfg := Config{Provider: providerAlias}
+func TestCloudflareAliasAcceptsResourceFlags(t *testing.T) {
+	cfg := Config{Provider: providerAlias, ServerType: cloudflareContainerInstanceTypeForClass("standard")}
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	_ = fs.String("class", "", "")
 	values := RegisterCloudflareProviderFlags(fs, cfg)
 	if err := fs.Parse([]string{"--class", "standard"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := ApplyCloudflareProviderFlags(&cfg, fs, values); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServerType != "standard-1" {
+		t.Fatalf("server type = %q, want standard-1", cfg.ServerType)
+	}
+}
+
+func TestCloudflareRejectsUnsupportedInstanceType(t *testing.T) {
+	cfg := Config{Provider: providerName, ServerType: "ccx63", ServerTypeExplicit: true}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values := RegisterCloudflareProviderFlags(fs, cfg)
 	if err := ApplyCloudflareProviderFlags(&cfg, fs, values); err == nil {
-		t.Fatal("expected provider alias to reject --class")
+		t.Fatal("expected unsupported instance type error")
 	}
 }
 

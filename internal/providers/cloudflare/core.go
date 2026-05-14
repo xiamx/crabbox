@@ -80,6 +80,18 @@ func printEnvForwardingSummary(w io.Writer, provider, behavior string, allow []s
 	core.PrintEnvForwardingSummary(w, provider, behavior, allow, env)
 }
 
+func cloudflareContainerInstanceTypes() []string {
+	return core.CloudflareContainerInstanceTypes()
+}
+
+func cloudflareContainerInstanceTypeForClass(class string) string {
+	return core.CloudflareContainerInstanceTypeForClass(class)
+}
+
+func normalizeCloudflareContainerInstanceType(value string) (string, bool) {
+	return core.NormalizeCloudflareContainerInstanceType(value)
+}
+
 func shellQuote(s string) string {
 	return core.ShellQuote(s)
 }

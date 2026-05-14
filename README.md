@@ -187,13 +187,17 @@ Namespace  standard  S
            fast      M
            large     L
            beast     XL
+
+Cloudflare standard  standard-1
+           fast      standard-2
+           large     standard-3
+           beast     standard-4
 ```
 
 Override with `--type` or `CRABBOX_SERVER_TYPE` for a specific instance.
+Cloudflare also accepts `lite` and `basic` as explicit `--type` values.
 Providers without a row either use provider-native capacity settings or reject
-class/type selection. Cloudflare uses the Worker configuration in
-`worker/wrangler.cloudflare.jsonc` (`instance_type`, `max_instances`) instead
-of machine classes.
+class/type selection.
 
 ## Configuration
 

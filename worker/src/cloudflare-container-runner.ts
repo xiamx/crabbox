@@ -2,8 +2,17 @@ import { Container, getContainer } from "@cloudflare/containers";
 
 const leaseMetaKey = "crabbox:lease";
 const cleanupCallback = "expireIfIdle";
+const defaultInstanceType = "standard-4";
+const instanceTypes = [
+  "lite",
+  "basic",
+  "standard-1",
+  "standard-2",
+  "standard-3",
+  "standard-4",
+] as const;
 
-export class Sandbox extends Container {
+class SandboxBase extends Container {
   override defaultPort = 8787;
   override sleepAfter = "30m";
   override enableInternet = true;
@@ -76,10 +85,15 @@ export class Sandbox extends Container {
     const existing = await this.leaseMeta();
     const ttlSeconds = positiveIntegerField(body, "ttlSeconds");
     const idleTimeoutSeconds = positiveIntegerField(body, "idleTimeoutSeconds");
+    const instanceType = cleanInstanceType(
+      stringField(body, "instanceType") ?? defaultInstanceType,
+    );
+    if (!instanceType) return json({ error: "instanceType is not supported" }, 400);
     const meta: LeaseMetadata = {
       id,
       state: "running",
       workdir,
+      instanceType,
       labels: sanitizeLabels(body["labels"]),
       createdAt: existing?.createdAt ?? now.toISOString(),
       lastTouchedAt: now.toISOString(),
@@ -303,9 +317,37 @@ export class Sandbox extends Container {
   }
 }
 
+export class Sandbox extends SandboxBase {}
+export class SandboxLite extends SandboxBase {}
+export class SandboxBasic extends SandboxBase {}
+export class SandboxStandard1 extends SandboxBase {}
+export class SandboxStandard2 extends SandboxBase {}
+export class SandboxStandard3 extends SandboxBase {}
+
 type Env = {
   Sandbox: DurableObjectNamespace<Sandbox>;
+  SandboxLite: DurableObjectNamespace<SandboxLite>;
+  SandboxBasic: DurableObjectNamespace<SandboxBasic>;
+  SandboxStandard1: DurableObjectNamespace<SandboxStandard1>;
+  SandboxStandard2: DurableObjectNamespace<SandboxStandard2>;
+  SandboxStandard3: DurableObjectNamespace<SandboxStandard3>;
   CRABBOX_RUNNER_TOKEN?: string;
+};
+
+type InstanceType = (typeof instanceTypes)[number];
+
+type SandboxNamespace =
+  | DurableObjectNamespace<Sandbox>
+  | DurableObjectNamespace<SandboxLite>
+  | DurableObjectNamespace<SandboxBasic>
+  | DurableObjectNamespace<SandboxStandard1>
+  | DurableObjectNamespace<SandboxStandard2>
+  | DurableObjectNamespace<SandboxStandard3>;
+
+type ResolvedSandbox = {
+  container: DurableObjectStub<SandboxBase>;
+  status: Response;
+  instanceType: InstanceType;
 };
 
 type LeaseState = "running" | "expired" | "stopped";
@@ -314,6 +356,7 @@ type LeaseMetadata = {
   id: string;
   state: LeaseState;
   workdir: string;
+  instanceType: string;
   labels: Record<string, string>;
   createdAt: string;
   lastTouchedAt: string;
@@ -346,16 +389,16 @@ export default {
     const action = match[2] ?? "";
 
     if (request.method === "GET" && action === "") {
-      return getSandboxStatus(env, sandboxID);
+      return getSandboxStatus(env, sandboxID, url);
     }
     if (request.method === "DELETE" && action === "") {
-      return destroySandbox(env, sandboxID);
+      return destroySandbox(env, sandboxID, url);
     }
     if (request.method === "POST" && action === "files") {
       return uploadFile(request, env, sandboxID, url);
     }
     if (request.method === "POST" && action === "exec-stream") {
-      return execStream(request, env, sandboxID);
+      return execStream(request, env, sandboxID, url);
     }
 
     return json({ error: "not found" }, 404);
@@ -371,8 +414,11 @@ async function createSandbox(request: Request, env: Env): Promise<Response> {
   const workdir = cleanAbsolutePath(stringField(body, "workdir") ?? "/workspace/crabbox");
   if (!workdir) return json({ error: "workdir must be an absolute path" }, 400);
 
-  const container = getContainer(env.Sandbox, sandboxID);
-  const sanitizedBody = { ...body, id: sandboxID, workdir };
+  const instanceType = cleanInstanceType(stringField(body, "instanceType") ?? defaultInstanceType);
+  if (!instanceType) return json({ error: "instanceType is not supported" }, 400);
+
+  const container = getContainer(namespaceForInstanceType(env, instanceType), sandboxID);
+  const sanitizedBody = { ...body, id: sandboxID, workdir, instanceType };
   return container.fetch(
     internalRequest("/__crabbox/create", undefined, {
       method: "POST",
@@ -382,18 +428,26 @@ async function createSandbox(request: Request, env: Env): Promise<Response> {
   );
 }
 
-async function getSandboxStatus(env: Env, sandboxID: string): Promise<Response> {
+async function getSandboxStatus(env: Env, sandboxID: string, url: URL): Promise<Response> {
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
-  const container = getContainer(env.Sandbox, id);
-  return container.fetch(internalRequest("/__crabbox/status"));
+  const requested = requestedInstanceType(url);
+  if (requested instanceof Response) return requested;
+  const resolved = await resolveSandbox(env, id, requested);
+  if (resolved instanceof Response) return resolved;
+  return resolved.status;
 }
 
-async function destroySandbox(env: Env, sandboxID: string): Promise<Response> {
+async function destroySandbox(env: Env, sandboxID: string, url: URL): Promise<Response> {
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
-  const container = getContainer(env.Sandbox, id);
-  return container.fetch(internalRequest("/__crabbox/destroy", undefined, { method: "DELETE" }));
+  const requested = requestedInstanceType(url);
+  if (requested instanceof Response) return requested;
+  const resolved = await resolveSandbox(env, id, requested);
+  if (resolved instanceof Response) return resolved;
+  return resolved.container.fetch(
+    internalRequest("/__crabbox/destroy", undefined, { method: "DELETE" }),
+  );
 }
 
 async function uploadFile(
@@ -405,24 +459,76 @@ async function uploadFile(
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
 
-  const container = getContainer(env.Sandbox, id);
-  return container.fetch(
+  const requested = requestedInstanceType(url);
+  if (requested instanceof Response) return requested;
+  const resolved = await resolveSandbox(env, id, requested);
+  if (resolved instanceof Response) return resolved;
+  return resolved.container.fetch(
     internalRequest(`/__crabbox/files${url.search}`, request, {
       method: "POST",
     }),
   );
 }
 
-async function execStream(request: Request, env: Env, sandboxID: string): Promise<Response> {
+async function execStream(
+  request: Request,
+  env: Env,
+  sandboxID: string,
+  url?: URL,
+): Promise<Response> {
   const id = cleanSandboxID(sandboxID);
   if (!id) return json({ error: "id is required" }, 400);
 
-  const container = getContainer(env.Sandbox, id);
-  return container.fetch(
+  const requested = url ? requestedInstanceType(url) : undefined;
+  if (requested instanceof Response) return requested;
+  const resolved = await resolveSandbox(env, id, requested);
+  if (resolved instanceof Response) return resolved;
+  return resolved.container.fetch(
     internalRequest("/__crabbox/exec-stream", request, {
       method: "POST",
     }),
   );
+}
+
+async function resolveSandbox(
+  env: Env,
+  sandboxID: string,
+  requested?: InstanceType,
+): Promise<ResolvedSandbox | Response> {
+  const candidates = requested
+    ? [requested, ...instanceTypes.filter((instanceType) => instanceType !== requested)]
+    : instanceTypes;
+  for (const instanceType of candidates) {
+    const container = getContainer(namespaceForInstanceType(env, instanceType), sandboxID);
+    // oxlint-disable-next-line eslint/no-await-in-loop -- stop at the first binding that owns this lease.
+    const status = await container.fetch(internalRequest("/__crabbox/status"));
+    if (status.status !== 404) return { container, status, instanceType };
+  }
+  return json({ error: "not found" }, 404);
+}
+
+function namespaceForInstanceType(env: Env, instanceType: InstanceType): SandboxNamespace {
+  switch (instanceType) {
+    case "lite":
+      return env.SandboxLite;
+    case "basic":
+      return env.SandboxBasic;
+    case "standard-1":
+      return env.SandboxStandard1;
+    case "standard-2":
+      return env.SandboxStandard2;
+    case "standard-3":
+      return env.SandboxStandard3;
+    case "standard-4":
+      return env.Sandbox;
+  }
+}
+
+function requestedInstanceType(url: URL): InstanceType | Response | undefined {
+  const raw = url.searchParams.get("instanceType") ?? url.searchParams.get("serverType");
+  if (raw === null) return undefined;
+  const instanceType = cleanInstanceType(raw);
+  return instanceType || json({ error: "instanceType is not supported" }, 400);
 }
 
 function authorize(request: Request, env: Env): Response | null {
@@ -465,6 +571,14 @@ function cleanSandboxID(value: string): string {
   const trimmed = value.trim();
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(trimmed)) return "";
   return trimmed;
+}
+
+function cleanInstanceType(value: string): InstanceType | "" {
+  const trimmed = value.trim().toLowerCase();
+  for (const instanceType of instanceTypes) {
+    if (trimmed === instanceType) return instanceType;
+  }
+  return "";
 }
 
 function cleanAbsolutePath(value: string): string {
@@ -558,6 +672,7 @@ function leaseResponse(meta: LeaseMetadata, containerState?: string): Record<str
     id: meta.id,
     state: meta.state === "running" ? (containerState ?? "running") : meta.state,
     workdir: meta.workdir,
+    instanceType: meta.instanceType,
     labels: meta.labels,
     createdAt: meta.createdAt,
     lastTouchedAt: meta.lastTouchedAt,
@@ -579,6 +694,7 @@ function emptyLeaseMeta(state: LeaseState = "stopped"): LeaseMetadata {
     id: "",
     state,
     workdir: "/workspace",
+    instanceType: defaultInstanceType,
     labels: {},
     createdAt: now,
     lastTouchedAt: now,

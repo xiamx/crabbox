@@ -18,17 +18,19 @@ import (
 )
 
 type cloudflareClient struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL      string
+	token        string
+	instanceType string
+	http         *http.Client
 }
 
 type cloudflareContainer struct {
-	ID        string            `json:"id"`
-	State     string            `json:"state"`
-	Workdir   string            `json:"workdir"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	CreatedAt string            `json:"createdAt,omitempty"`
+	ID           string            `json:"id"`
+	State        string            `json:"state"`
+	Workdir      string            `json:"workdir"`
+	InstanceType string            `json:"instanceType,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	CreatedAt    string            `json:"createdAt,omitempty"`
 }
 
 type createSandboxRequest struct {
@@ -37,6 +39,7 @@ type createSandboxRequest struct {
 	Slug               string            `json:"slug"`
 	Repo               string            `json:"repo,omitempty"`
 	Workdir            string            `json:"workdir"`
+	InstanceType       string            `json:"instanceType,omitempty"`
 	TTLSeconds         int               `json:"ttlSeconds,omitempty"`
 	IdleTimeoutSeconds int               `json:"idleTimeoutSeconds,omitempty"`
 	Labels             map[string]string `json:"labels,omitempty"`
@@ -65,6 +68,10 @@ func newCloudflareClient(cfg Config, rt Runtime) (*cloudflareClient, error) {
 	if token == "" {
 		return nil, exit(2, "%s requires CRABBOX_CLOUDFLARE_RUNNER_TOKEN or user-level config", providerName)
 	}
+	instanceType, ok := normalizeCloudflareContainerInstanceType(blank(cfg.ServerType, cloudflareContainerInstanceTypeForClass(cfg.Class)))
+	if !ok {
+		return nil, exit(2, "%s --type must be one of %s", providerName, strings.Join(cloudflareContainerInstanceTypes(), ", "))
+	}
 	parsed, err := url.Parse(apiURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, exit(2, "%s url %q is invalid", providerName, apiURL)
@@ -77,9 +84,10 @@ func newCloudflareClient(cfg Config, rt Runtime) (*cloudflareClient, error) {
 		httpClient = http.DefaultClient
 	}
 	return &cloudflareClient{
-		baseURL: strings.TrimRight(apiURL, "/"),
-		token:   token,
-		http:    httpClient,
+		baseURL:      strings.TrimRight(apiURL, "/"),
+		token:        token,
+		instanceType: instanceType,
+		http:         httpClient,
 	}, nil
 }
 
@@ -99,12 +107,12 @@ func (c *cloudflareClient) createSandbox(ctx context.Context, req createSandboxR
 
 func (c *cloudflareClient) getSandbox(ctx context.Context, sandboxID string) (cloudflareContainer, error) {
 	var sandbox cloudflareContainer
-	err := c.doJSON(ctx, http.MethodGet, "/v1/sandboxes/"+url.PathEscape(sandboxID), nil, &sandbox)
+	err := c.doJSON(ctx, http.MethodGet, c.sandboxEndpoint(sandboxID, ""), nil, &sandbox)
 	return sandbox, err
 }
 
 func (c *cloudflareClient) destroySandbox(ctx context.Context, sandboxID string) error {
-	return c.doJSON(ctx, http.MethodDelete, "/v1/sandboxes/"+url.PathEscape(sandboxID), nil, nil)
+	return c.doJSON(ctx, http.MethodDelete, c.sandboxEndpoint(sandboxID, ""), nil, nil)
 }
 
 func (c *cloudflareClient) uploadFile(ctx context.Context, sandboxID, localPath, remotePath string) error {
@@ -117,7 +125,7 @@ func (c *cloudflareClient) uploadFile(ctx context.Context, sandboxID, localPath,
 	if err != nil {
 		return fmt.Errorf("stat upload file: %w", err)
 	}
-	endpoint := "/v1/sandboxes/" + url.PathEscape(sandboxID) + "/files?path=" + url.QueryEscape(remotePath)
+	endpoint := c.sandboxEndpoint(sandboxID, "/files") + "&path=" + url.QueryEscape(remotePath)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+endpoint, file)
 	if err != nil {
 		return err
@@ -141,7 +149,7 @@ func (c *cloudflareClient) execStream(ctx context.Context, sandboxID string, req
 	if err := json.NewEncoder(&body).Encode(req); err != nil {
 		return 0, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/sandboxes/"+url.PathEscape(sandboxID)+"/exec-stream", &body)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+c.sandboxEndpoint(sandboxID, "/exec-stream"), &body)
 	if err != nil {
 		return 0, err
 	}
@@ -204,6 +212,11 @@ func (c *cloudflareClient) execStream(ctx context.Context, sandboxID string, req
 		return exitCode, fmt.Errorf("%s stream ended before completion", providerName)
 	}
 	return exitCode, nil
+}
+
+func (c *cloudflareClient) sandboxEndpoint(sandboxID, suffix string) string {
+	endpoint := "/v1/sandboxes/" + url.PathEscape(sandboxID) + suffix + "?instanceType=" + url.QueryEscape(c.instanceType)
+	return endpoint
 }
 
 func (c *cloudflareClient) doJSON(ctx context.Context, method, endpoint string, input any, output any) error {

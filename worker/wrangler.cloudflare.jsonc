@@ -8,6 +8,36 @@
   "preview_urls": false,
   "containers": [
     {
+      "class_name": "SandboxLite",
+      "image": "./cloudflare-container.Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 4,
+    },
+    {
+      "class_name": "SandboxBasic",
+      "image": "./cloudflare-container.Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 4,
+    },
+    {
+      "class_name": "SandboxStandard1",
+      "image": "./cloudflare-container.Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 4,
+    },
+    {
+      "class_name": "SandboxStandard2",
+      "image": "./cloudflare-container.Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 4,
+    },
+    {
+      "class_name": "SandboxStandard3",
+      "image": "./cloudflare-container.Dockerfile",
+      "instance_type": "standard-3",
+      "max_instances": 4,
+    },
+    {
       "class_name": "Sandbox",
       "image": "./cloudflare-container.Dockerfile",
       "instance_type": "standard-4",
@@ -20,12 +50,42 @@
         "name": "Sandbox",
         "class_name": "Sandbox",
       },
+      {
+        "name": "SandboxLite",
+        "class_name": "SandboxLite",
+      },
+      {
+        "name": "SandboxBasic",
+        "class_name": "SandboxBasic",
+      },
+      {
+        "name": "SandboxStandard1",
+        "class_name": "SandboxStandard1",
+      },
+      {
+        "name": "SandboxStandard2",
+        "class_name": "SandboxStandard2",
+      },
+      {
+        "name": "SandboxStandard3",
+        "class_name": "SandboxStandard3",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "cloudflare-container-v1",
       "new_sqlite_classes": ["Sandbox"],
+    },
+    {
+      "tag": "cloudflare-container-v2",
+      "new_sqlite_classes": [
+        "SandboxLite",
+        "SandboxBasic",
+        "SandboxStandard1",
+        "SandboxStandard2",
+        "SandboxStandard3",
+      ],
     },
   ],
   "vars": {

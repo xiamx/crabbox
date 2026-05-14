@@ -2002,6 +2002,9 @@ func serverTypeForConfig(cfg Config) string {
 	if cfg.Provider == "daytona" {
 		return "snapshot"
 	}
+	if cfg.Provider == "cloudflare" {
+		return cloudflareContainerInstanceTypeForClass(cfg.Class)
+	}
 	if cfg.Provider == "aws" {
 		return awsInstanceTypeCandidatesForConfig(cfg)[0]
 	}
@@ -2035,6 +2038,9 @@ func serverTypeForProviderClass(provider, class string) string {
 	}
 	if provider == "daytona" {
 		return "snapshot"
+	}
+	if provider == "cloudflare" {
+		return cloudflareContainerInstanceTypeForClass(class)
 	}
 	if provider == "aws" {
 		return awsInstanceTypeCandidatesForClass(class)[0]
@@ -2084,6 +2090,50 @@ func namespaceDevboxSizeForClass(class string) string {
 		}
 		return strings.ToUpper(strings.TrimSpace(class))
 	}
+}
+
+func cloudflareContainerInstanceTypes() []string {
+	return []string{"lite", "basic", "standard-1", "standard-2", "standard-3", "standard-4"}
+}
+
+func CloudflareContainerInstanceTypes() []string {
+	return cloudflareContainerInstanceTypes()
+}
+
+func normalizeCloudflareContainerInstanceType(value string) (string, bool) {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	for _, instanceType := range cloudflareContainerInstanceTypes() {
+		if trimmed == instanceType {
+			return instanceType, true
+		}
+	}
+	return "", false
+}
+
+func NormalizeCloudflareContainerInstanceType(value string) (string, bool) {
+	return normalizeCloudflareContainerInstanceType(value)
+}
+
+func cloudflareContainerInstanceTypeForClass(class string) string {
+	switch strings.ToLower(strings.TrimSpace(class)) {
+	case "", "beast":
+		return "standard-4"
+	case "standard":
+		return "standard-1"
+	case "fast":
+		return "standard-2"
+	case "large":
+		return "standard-3"
+	default:
+		if instanceType, ok := normalizeCloudflareContainerInstanceType(class); ok {
+			return instanceType
+		}
+		return strings.TrimSpace(class)
+	}
+}
+
+func CloudflareContainerInstanceTypeForClass(class string) string {
+	return cloudflareContainerInstanceTypeForClass(class)
 }
 
 func serverTypeCandidatesForClass(class string) []string {

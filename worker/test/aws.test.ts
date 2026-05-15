@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  EC2SpotClient,
   addRunInstancesTagSpecifications,
   applyAWSRunInstanceTargetOptions,
   awsAvailabilityZoneForRegion,
@@ -16,6 +17,12 @@ import {
   isAWSInstanceNotFoundError,
   staleCrabboxSSHIngressRules,
 } from "../src/aws";
+import { leaseConfig } from "../src/config";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("aws provider", () => {
   it("uses the EC2 query parameter names for security group creation", () => {
@@ -214,6 +221,220 @@ describe("aws provider", () => {
     ).toBe("eu-west-1b");
   });
 
+  it("waits for transient AMIs before launching from EBS snapshots", async () => {
+    const client = new EC2SpotClient(
+      { AWS_ACCESS_KEY_ID: "test", AWS_SECRET_ACCESS_KEY: "secret" } as never,
+      "eu-west-1",
+    ) as unknown as EC2SpotClient & {
+      ensureSSHKey: () => Promise<void>;
+      registerSnapshotImage: () => Promise<string>;
+      waitForImageAvailable: (imageID: string) => Promise<string>;
+      ensureSecurityGroup: () => Promise<string>;
+      createServer: (...args: unknown[]) => Promise<{
+        provider: "aws";
+        id: number;
+        cloudID: string;
+        name: string;
+        status: string;
+        serverType: string;
+        host: string;
+        labels: Record<string, string>;
+      }>;
+    };
+    const calls: string[] = [];
+    client.ensureSSHKey = async () => {
+      calls.push("ensure-key");
+    };
+    client.registerSnapshotImage = async () => {
+      calls.push("register-snapshot");
+      return "ami-transient";
+    };
+    client.waitForImageAvailable = async (imageID: string) => {
+      calls.push(`wait:${imageID}`);
+      return imageID;
+    };
+    client.ensureSecurityGroup = async () => {
+      calls.push("security-group");
+      return "sg-123";
+    };
+    client.createServer = async (...args: unknown[]) => {
+      calls.push(`launch:${String(args[4])}`);
+      return {
+        provider: "aws",
+        id: 1,
+        cloudID: "i-123",
+        name: "crabbox-blue-lobster",
+        status: "running",
+        serverType: "t3.small",
+        host: "192.0.2.10",
+        labels: {},
+      };
+    };
+
+    await client.createServerWithFallback(
+      leaseConfig({
+        provider: "aws",
+        serverType: "t3.small",
+        serverTypeExplicit: true,
+        awsSnapshot: "snap-000000000001",
+        sshPublicKey: "ssh-ed25519 test",
+        capacity: { market: "on-demand" },
+      }),
+      "cbx_123456789abc",
+      "blue-lobster",
+      "owner",
+    );
+
+    expect(calls).toEqual([
+      "ensure-key",
+      "register-snapshot",
+      "wait:ami-transient",
+      "security-group",
+      "launch:ami-transient",
+    ]);
+  });
+
+  it("deregisters transient AMIs when snapshot image waiting fails", async () => {
+    const client = new EC2SpotClient(
+      { AWS_ACCESS_KEY_ID: "test", AWS_SECRET_ACCESS_KEY: "secret" } as never,
+      "eu-west-1",
+    ) as unknown as EC2SpotClient & {
+      ensureSSHKey: () => Promise<void>;
+      registerSnapshotImage: () => Promise<string>;
+      waitForImageAvailable: (imageID: string) => Promise<string>;
+      ec2: (action: string, params?: Record<string, string>) => Promise<unknown>;
+    };
+    const calls: string[] = [];
+    client.ensureSSHKey = async () => {
+      calls.push("ensure-key");
+    };
+    client.registerSnapshotImage = async () => {
+      calls.push("register-snapshot");
+      return "ami-transient";
+    };
+    client.waitForImageAvailable = async (imageID: string) => {
+      calls.push(`wait:${imageID}`);
+      throw new Error("timed out waiting");
+    };
+    client.ec2 = async (action, params) => {
+      calls.push(`${action}:${params?.ImageId ?? ""}`);
+      return {};
+    };
+
+    await expect(
+      client.createServerWithFallback(
+        leaseConfig({
+          provider: "aws",
+          serverType: "t3.small",
+          serverTypeExplicit: true,
+          awsSnapshot: "snap-000000000001",
+          sshPublicKey: "ssh-ed25519 test",
+          capacity: { market: "on-demand" },
+        }),
+        "cbx_123456789abc",
+        "blue-lobster",
+        "owner",
+      ),
+    ).rejects.toThrow("timed out waiting");
+
+    expect(calls).toEqual([
+      "ensure-key",
+      "register-snapshot",
+      "wait:ami-transient",
+      "DeregisterImage:ami-transient",
+    ]);
+  });
+
+  it("registers snapshot AMIs with stored boot metadata", async () => {
+    const client = new EC2SpotClient(
+      { AWS_ACCESS_KEY_ID: "test", AWS_SECRET_ACCESS_KEY: "secret" } as never,
+      "eu-west-1",
+    ) as unknown as EC2SpotClient & {
+      registerSnapshotImage: (snapshotID: string, leaseID: string) => Promise<string>;
+      ec2: (action: string, params?: Record<string, string>) => Promise<Record<string, unknown>>;
+    };
+    const registerParams: Record<string, string>[] = [];
+    client.ec2 = async (action, params = {}) => {
+      if (action === "DescribeSnapshots") {
+        return {
+          snapshotSet: {
+            item: {
+              snapshotId: "snap-000000000001",
+              tagSet: {
+                item: [
+                  { key: "crabbox_root_device_name", value: "/dev/xvda" },
+                  { key: "crabbox_architecture", value: "arm64" },
+                ],
+              },
+            },
+          },
+        };
+      }
+      if (action === "RegisterImage") {
+        registerParams.push(params);
+        return { imageId: "ami-transient" };
+      }
+      throw new Error(`unexpected ${action}`);
+    };
+
+    const imageID = await client.registerSnapshotImage("snap-000000000001", "cbx_123456789abc");
+
+    expect(imageID).toBe("ami-transient");
+    expect(registerParams[0]).toMatchObject({
+      Architecture: "arm64",
+      RootDeviceName: "/dev/xvda",
+      "BlockDeviceMapping.1.DeviceName": "/dev/xvda",
+    });
+  });
+
+  it("stores source boot metadata on EBS snapshot checkpoints", async () => {
+    const client = new EC2SpotClient(
+      { AWS_ACCESS_KEY_ID: "test", AWS_SECRET_ACCESS_KEY: "secret" } as never,
+      "eu-west-1",
+    ) as unknown as EC2SpotClient & {
+      createDiskSnapshot: (instanceID: string, name: string) => Promise<unknown>;
+      ec2: (action: string, params?: Record<string, string>) => Promise<Record<string, unknown>>;
+    };
+    const snapshotParams: Record<string, string>[] = [];
+    client.ec2 = async (action, params = {}) => {
+      if (action === "DescribeInstances") {
+        return {
+          reservationSet: {
+            item: {
+              instancesSet: {
+                item: {
+                  rootDeviceName: "/dev/xvda",
+                  architecture: "arm64",
+                  blockDeviceMapping: {
+                    item: {
+                      deviceName: "/dev/xvda",
+                      ebs: { volumeId: "vol-000000000001" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        };
+      }
+      if (action === "CreateSnapshot") {
+        snapshotParams.push(params);
+        return { snapshotId: "snap-000000000001", status: "pending" };
+      }
+      throw new Error(`unexpected ${action}`);
+    };
+
+    await client.createDiskSnapshot("i-000000000001", "checkpoint");
+
+    expect(snapshotParams[0]).toMatchObject({
+      VolumeId: "vol-000000000001",
+      "TagSpecification.1.Tag.4.Key": "crabbox_root_device_name",
+      "TagSpecification.1.Tag.4.Value": "/dev/xvda",
+      "TagSpecification.1.Tag.5.Key": "crabbox_architecture",
+      "TagSpecification.1.Tag.5.Value": "arm64",
+    });
+  });
+
   it("maps AWS instance types to vCPU quota units", () => {
     expect(awsInstanceTypeVCPUs("c7a.48xlarge")).toBe(192);
     expect(awsInstanceTypeVCPUs("c7a.xlarge")).toBe(4);
@@ -234,4 +455,72 @@ describe("aws provider", () => {
     expect(awsQuotaPreflightAttempt("t3.small", "on-demand", "eu-west-1", 32)).toBeUndefined();
     expect(awsQuotaPreflightAttempt("c7gn.metal", "spot", "eu-west-1", 32)).toBeUndefined();
   });
+
+  it("retries snapshot deletion after deregistering an image", async () => {
+    vi.useFakeTimers();
+    const actions: string[] = [];
+    let deleteSnapshotCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        const body = await request.clone().text();
+        const action = new URLSearchParams(body).get("Action") ?? "";
+        actions.push(action);
+        if (action === "DescribeImages") {
+          return ec2XMLResponse(`<?xml version="1.0" encoding="UTF-8"?>
+<DescribeImagesResponse>
+  <imagesSet>
+    <item>
+      <imageId>ami-000000000001</imageId>
+      <name>checkpoint</name>
+      <imageState>available</imageState>
+      <blockDeviceMapping>
+        <item><ebs><snapshotId>snap-000000000001</snapshotId></ebs></item>
+      </blockDeviceMapping>
+    </item>
+  </imagesSet>
+</DescribeImagesResponse>`);
+        }
+        if (action === "DeregisterImage") {
+          return ec2XMLResponse("<DeregisterImageResponse />");
+        }
+        if (action === "DeleteSnapshot") {
+          deleteSnapshotCalls++;
+          if (deleteSnapshotCalls === 1) {
+            return ec2XMLResponse(
+              "<Response><Errors><Error><Code>InvalidSnapshot.InUse</Code><Message>snapshot is currently in use</Message></Error></Errors></Response>",
+              400,
+            );
+          }
+          return ec2XMLResponse("<DeleteSnapshotResponse />");
+        }
+        return ec2XMLResponse(
+          `<Response><Errors><Error><Code>Unexpected</Code><Message>${action}</Message></Error></Errors></Response>`,
+          500,
+        );
+      }),
+    );
+
+    const client = new EC2SpotClient(
+      { AWS_ACCESS_KEY_ID: "test", AWS_SECRET_ACCESS_KEY: "secret" } as never,
+      "eu-west-1",
+    );
+    const deletion = client.deleteImage("ami-000000000001");
+    await vi.waitFor(() => expect(deleteSnapshotCalls).toBe(1));
+    expect(actions).toEqual(["DescribeImages", "DeregisterImage", "DeleteSnapshot"]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await deletion;
+
+    expect(actions).toEqual([
+      "DescribeImages",
+      "DeregisterImage",
+      "DeleteSnapshot",
+      "DeleteSnapshot",
+    ]);
+  });
 });
+
+function ec2XMLResponse(body: string, status = 200): Response {
+  return new Response(body, { status, headers: { "content-type": "application/xml" } });
+}

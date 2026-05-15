@@ -16,6 +16,7 @@ const awsUbuntuOwner = "099720109477";
 const ec2Version = "2016-11-15";
 const awsSpotQuotaCode = "L-34B43A08";
 const awsOnDemandQuotaCode = "L-1216C47A";
+const snapshotDeleteBackoffMs = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 
 export function createSecurityGroupParams(name: string, vpcID: string): Record<string, string> {
   return {
@@ -117,72 +118,35 @@ export class EC2SpotClient {
     attempts?: ProvisioningAttempt[];
   }> {
     await this.ensureSSHKey(config.providerKey, config.sshPublicKey);
-    const imageID = await this.resolveAMI(config);
-    const securityGroupID = await this.ensureSecurityGroup(config);
-    const candidates = awsLaunchCandidates(config);
-    const failures: string[] = [];
-    const attempts: ProvisioningAttempt[] = [];
-    const quotaCache = new Map<string, number | undefined>();
-    for (const serverType of candidates) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- quota preflight follows sequential fallback order.
-      const preflight = await this.quotaPreflightAttempt(
-        serverType,
-        config.capacityMarket,
-        quotaCache,
-      );
-      if (preflight) {
-        attempts.push(preflight);
-        failures.push(`${serverType}: ${preflight.message}`);
-        continue;
-      }
-      try {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- instance-type fallback must stay sequential.
-        const server = await this.createServer(
-          { ...config, serverType },
-          leaseID,
-          slug,
-          owner,
-          imageID,
-          securityGroupID,
-        );
-        const result: {
-          server: ProviderMachine;
-          serverType: string;
-          market?: string;
-          attempts?: ProvisioningAttempt[];
-        } = { server, serverType, market: config.capacityMarket };
-        if (attempts.length > 0) {
-          result.attempts = attempts;
-        }
-        return result;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        attempts.push({
-          region: this.region,
-          serverType,
-          market: config.capacityMarket,
-          category: awsProvisioningErrorCategory(message) || "fatal",
-          message: conciseAWSProvisioningMessage(message),
-        });
-        failures.push(`${serverType}: ${message}`);
-        if (!isRetryableAWSProvisioningError(message)) {
-          break;
-        }
-      }
-    }
-    if (config.capacityMarket === "spot" && config.capacityFallback.startsWith("on-demand")) {
+    let transientImageID = "";
+    try {
+      const imageID = config.awsSnapshot
+        ? await (async () => {
+            transientImageID = await this.registerSnapshotImage(config.awsSnapshot, leaseID);
+            return this.waitForImageAvailable(transientImageID);
+          })()
+        : await this.resolveAMI(config);
+      const securityGroupID = await this.ensureSecurityGroup(config);
+      const candidates = awsLaunchCandidates(config);
+      const failures: string[] = [];
+      const attempts: ProvisioningAttempt[] = [];
+      const quotaCache = new Map<string, number | undefined>();
       for (const serverType of candidates) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- on-demand fallback must stay sequential.
-        const preflight = await this.quotaPreflightAttempt(serverType, "on-demand", quotaCache);
+        // oxlint-disable-next-line eslint/no-await-in-loop -- quota preflight follows sequential fallback order.
+        const preflight = await this.quotaPreflightAttempt(
+          serverType,
+          config.capacityMarket,
+          quotaCache,
+        );
         if (preflight) {
           attempts.push(preflight);
-          failures.push(`on-demand ${serverType}: ${preflight.message}`);
+          failures.push(`${serverType}: ${preflight.message}`);
           continue;
         }
         try {
-          // oxlint-disable-next-line eslint/no-await-in-loop -- on-demand fallback must stay sequential.
+          // oxlint-disable-next-line eslint/no-await-in-loop -- instance-type fallback must stay sequential.
           const server = await this.createServer(
-            { ...config, capacityMarket: "on-demand", serverType },
+            { ...config, serverType },
             leaseID,
             slug,
             owner,
@@ -194,7 +158,7 @@ export class EC2SpotClient {
             serverType: string;
             market?: string;
             attempts?: ProvisioningAttempt[];
-          } = { server, serverType, market: "on-demand" };
+          } = { server, serverType, market: config.capacityMarket };
           if (attempts.length > 0) {
             result.attempts = attempts;
           }
@@ -204,23 +168,72 @@ export class EC2SpotClient {
           attempts.push({
             region: this.region,
             serverType,
-            market: "on-demand",
+            market: config.capacityMarket,
             category: awsProvisioningErrorCategory(message) || "fatal",
             message: conciseAWSProvisioningMessage(message),
           });
-          failures.push(`on-demand ${serverType}: ${message}`);
+          failures.push(`${serverType}: ${message}`);
           if (!isRetryableAWSProvisioningError(message)) {
             break;
           }
         }
       }
+      if (config.capacityMarket === "spot" && config.capacityFallback.startsWith("on-demand")) {
+        for (const serverType of candidates) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- on-demand fallback must stay sequential.
+          const preflight = await this.quotaPreflightAttempt(serverType, "on-demand", quotaCache);
+          if (preflight) {
+            attempts.push(preflight);
+            failures.push(`on-demand ${serverType}: ${preflight.message}`);
+            continue;
+          }
+          try {
+            // oxlint-disable-next-line eslint/no-await-in-loop -- on-demand fallback must stay sequential.
+            const server = await this.createServer(
+              { ...config, capacityMarket: "on-demand", serverType },
+              leaseID,
+              slug,
+              owner,
+              imageID,
+              securityGroupID,
+            );
+            const result: {
+              server: ProviderMachine;
+              serverType: string;
+              market?: string;
+              attempts?: ProvisioningAttempt[];
+            } = { server, serverType, market: "on-demand" };
+            if (attempts.length > 0) {
+              result.attempts = attempts;
+            }
+            return result;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            attempts.push({
+              region: this.region,
+              serverType,
+              market: "on-demand",
+              category: awsProvisioningErrorCategory(message) || "fatal",
+              message: conciseAWSProvisioningMessage(message),
+            });
+            failures.push(`on-demand ${serverType}: ${message}`);
+            if (!isRetryableAWSProvisioningError(message)) {
+              break;
+            }
+          }
+        }
+      }
+      if (config.serverTypeExplicit) {
+        throw new Error(
+          `requested exact AWS instance type ${config.serverType} failed; remove --type to allow class fallback: ${failures.join("; ")}`,
+        );
+      }
+      throw new Error(failures.join("; "));
+    } finally {
+      if (transientImageID) {
+        await this.ec2("DeregisterImage", { ImageId: transientImageID }).catch(() => undefined);
+      }
     }
-    if (config.serverTypeExplicit) {
-      throw new Error(
-        `requested exact AWS instance type ${config.serverType} failed; remove --type to allow class fallback: ${failures.join("; ")}`,
-      );
-    }
-    throw new Error(failures.join("; "));
   }
 
   async getServer(instanceID: string): Promise<ProviderMachine> {
@@ -264,6 +277,39 @@ export class EC2SpotClient {
     await this.ec2("TerminateInstances", { "InstanceId.1": instanceID });
   }
 
+  async createDiskSnapshot(instanceID: string, name: string): Promise<ProviderImage> {
+    const source = await this.instanceRootVolumeMetadata(instanceID);
+    const root = await this.ec2("CreateSnapshot", {
+      VolumeId: source.volumeID,
+      Description: `Crabbox checkpoint from ${instanceID}`,
+      "TagSpecification.1.ResourceType": "snapshot",
+      "TagSpecification.1.Tag.1.Key": "crabbox",
+      "TagSpecification.1.Tag.1.Value": "true",
+      "TagSpecification.1.Tag.2.Key": "created_by",
+      "TagSpecification.1.Tag.2.Value": "crabbox",
+      "TagSpecification.1.Tag.3.Key": "Name",
+      "TagSpecification.1.Tag.3.Value": name,
+      "TagSpecification.1.Tag.4.Key": "crabbox_root_device_name",
+      "TagSpecification.1.Tag.4.Value": source.rootDeviceName,
+      "TagSpecification.1.Tag.5.Key": "crabbox_architecture",
+      "TagSpecification.1.Tag.5.Value": source.architecture,
+    });
+    const snapshotID = asString(root["snapshotId"]);
+    if (!snapshotID) {
+      throw new Error("aws returned no snapshot id");
+    }
+    return {
+      id: snapshotID,
+      name,
+      state: asString(root["status"]) || "pending",
+      provider: "aws",
+      kind: "aws-ebs-snapshot",
+      region: this.region,
+      resourceID: snapshotID,
+      snapshots: [snapshotID],
+    };
+  }
+
   async createImage(instanceID: string, name: string, noReboot: boolean): Promise<ProviderImage> {
     const params: Record<string, string> = {
       InstanceId: instanceID,
@@ -282,10 +328,21 @@ export class EC2SpotClient {
     if (!imageID) {
       throw new Error("aws returned no image id");
     }
-    return { id: imageID, name, state: "pending", region: this.region };
+    return {
+      id: imageID,
+      name,
+      state: "pending",
+      provider: "aws",
+      kind: "aws-ami",
+      region: this.region,
+      resourceID: imageID,
+    };
   }
 
   async getImage(imageID: string): Promise<ProviderImage> {
+    if (imageID.startsWith("snap-")) {
+      return await this.getSnapshot(imageID);
+    }
     const root = await this.ec2("DescribeImages", {
       "ImageId.1": imageID,
     });
@@ -298,8 +355,166 @@ export class EC2SpotClient {
       id,
       name: asString(image["name"]),
       state: asString(image["imageState"]),
+      provider: "aws",
+      kind: "aws-ami",
       region: this.region,
+      resourceID: id,
+      snapshots: imageSnapshotIDs(image),
     };
+  }
+
+  async deleteImage(imageID: string): Promise<void> {
+    if (imageID.startsWith("snap-")) {
+      await this.deleteSnapshotWithRetry(imageID);
+      return;
+    }
+    const image = await this.getImage(imageID);
+    await this.ec2("DeregisterImage", { ImageId: imageID }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("InvalidAMIID.NotFound")) {
+        throw error;
+      }
+    });
+    for (const snapshotID of image.snapshots ?? []) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- EBS snapshot deletes are independent cleanup calls.
+      await this.deleteSnapshotWithRetry(snapshotID);
+    }
+  }
+
+  private async getSnapshot(snapshotID: string): Promise<ProviderImage> {
+    const root = await this.ec2("DescribeSnapshots", {
+      "SnapshotId.1": snapshotID,
+    });
+    const snapshot = record(items(record(root["snapshotSet"])["item"])[0]);
+    const id = asString(snapshot["snapshotId"]);
+    if (!id) {
+      throw new Error(`aws snapshot not found: ${snapshotID}`);
+    }
+    return {
+      id,
+      name: tagValue(snapshot, "Name") || id,
+      state: asString(snapshot["status"]),
+      provider: "aws",
+      kind: "aws-ebs-snapshot",
+      region: this.region,
+      resourceID: id,
+      snapshots: [id],
+    };
+  }
+
+  private async instanceRootVolumeMetadata(instanceID: string): Promise<{
+    volumeID: string;
+    rootDeviceName: string;
+    architecture: string;
+  }> {
+    const root = await this.ec2("DescribeInstances", {
+      "InstanceId.1": instanceID,
+    });
+    for (const reservation of reservations(root)) {
+      for (const instance of items(record(record(reservation)["instancesSet"])["item"])) {
+        const inst = record(instance);
+        const rootDevice = asString(inst["rootDeviceName"]) || "/dev/sda1";
+        for (const mapping of items(record(inst["blockDeviceMapping"])["item"])) {
+          const map = record(mapping);
+          if (asString(map["deviceName"]) !== rootDevice) continue;
+          const volumeID = asString(record(map["ebs"])["volumeId"]);
+          if (volumeID) {
+            return {
+              volumeID,
+              rootDeviceName: rootDevice,
+              architecture: asString(inst["architecture"]) || "x86_64",
+            };
+          }
+        }
+      }
+    }
+    throw new Error(`aws root volume not found for instance ${instanceID}`);
+  }
+
+  private async registerSnapshotImage(snapshotID: string, leaseID: string): Promise<string> {
+    const name = `crabbox-${leaseID.replaceAll("_", "-")}-${Date.now()}`;
+    const metadata = await this.snapshotBootMetadata(snapshotID);
+    const root = await this.ec2("RegisterImage", {
+      Name: name,
+      Architecture: metadata.architecture,
+      RootDeviceName: metadata.rootDeviceName,
+      VirtualizationType: "hvm",
+      EnaSupport: "true",
+      "BlockDeviceMapping.1.DeviceName": metadata.rootDeviceName,
+      "BlockDeviceMapping.1.Ebs.SnapshotId": snapshotID,
+      "BlockDeviceMapping.1.Ebs.DeleteOnTermination": "true",
+      "BlockDeviceMapping.1.Ebs.VolumeType": "gp3",
+      "TagSpecification.1.ResourceType": "image",
+      "TagSpecification.1.Tag.1.Key": "crabbox",
+      "TagSpecification.1.Tag.1.Value": "true",
+      "TagSpecification.1.Tag.2.Key": "created_by",
+      "TagSpecification.1.Tag.2.Value": "crabbox",
+      "TagSpecification.1.Tag.3.Key": "transient_checkpoint_snapshot",
+      "TagSpecification.1.Tag.3.Value": snapshotID,
+    });
+    const imageID = asString(root["imageId"]);
+    if (!imageID) {
+      throw new Error("aws returned no transient image id");
+    }
+    return imageID;
+  }
+
+  private async snapshotBootMetadata(snapshotID: string): Promise<{
+    rootDeviceName: string;
+    architecture: string;
+  }> {
+    const root = await this.ec2("DescribeSnapshots", {
+      "SnapshotId.1": snapshotID,
+    });
+    const snapshot = record(items(record(root["snapshotSet"])["item"])[0]);
+    return {
+      rootDeviceName: tagValue(snapshot, "crabbox_root_device_name") || "/dev/sda1",
+      architecture: tagValue(snapshot, "crabbox_architecture") || "x86_64",
+    };
+  }
+
+  private async waitForImageAvailable(imageID: string): Promise<string> {
+    const deadline = Date.now() + 600_000;
+    for (;;) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- EC2 AMI availability is eventually consistent.
+      const image = await this.getImage(imageID);
+      if (image.state === "available") return imageID;
+      if (image.state === "failed" || image.state === "invalid") {
+        throw new Error(`aws transient image ${imageID} is ${image.state}`);
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for AWS transient image ${imageID}`);
+      }
+      // oxlint-disable-next-line eslint/no-await-in-loop -- polling interval.
+      await sleep(5_000);
+    }
+  }
+
+  private async deleteSnapshotWithRetry(snapshotID: string): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= snapshotDeleteBackoffMs.length; attempt++) {
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- retry preserves snapshot IDs after AMI deregistration.
+        await this.ec2("DeleteSnapshot", { SnapshotId: snapshotID });
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("InvalidSnapshot.NotFound")) {
+          return;
+        }
+        if (!isRetryableSnapshotDeleteError(message)) {
+          throw error;
+        }
+        lastError = error;
+        const backoffMs = snapshotDeleteBackoffMs[attempt];
+        if (backoffMs === undefined) {
+          break;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- AWS can keep just-deregistered AMI snapshots locked briefly.
+        await sleep(backoffMs);
+      }
+    }
+    throw lastError;
   }
 
   async deleteSSHKey(name: string): Promise<void> {
@@ -726,6 +941,34 @@ function items(value: unknown): unknown[] {
     return value;
   }
   return value === undefined ? [] : [value];
+}
+
+function imageSnapshotIDs(image: Record<string, unknown>): string[] {
+  const mappings = items(record(image["blockDeviceMapping"])["item"]);
+  const snapshots = mappings
+    .map((mapping) => asString(record(record(mapping)["ebs"])["snapshotId"]))
+    .filter((snapshotID) => snapshotID !== "");
+  return [...new Set(snapshots)];
+}
+
+function tagValue(resource: Record<string, unknown>, key: string): string {
+  for (const tag of items(record(resource["tagSet"])["item"])) {
+    const item = record(tag);
+    if (asString(item["key"]) === key) return asString(item["value"]);
+  }
+  return "";
+}
+
+function isRetryableSnapshotDeleteError(message: string): boolean {
+  return (
+    message.includes("InvalidSnapshot.InUse") ||
+    message.includes("RequestLimitExceeded") ||
+    message.includes("Throttl") ||
+    message.includes("ServiceUnavailable") ||
+    message.includes("InternalError") ||
+    message.includes("http 5") ||
+    message.toLowerCase().includes("currently in use")
+  );
 }
 
 function asString(value: unknown): string {

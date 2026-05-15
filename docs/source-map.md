@@ -65,7 +65,7 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
   `internal/providers/modal`, `internal/providers/tensorlake`, plus shared helpers in `internal/providers/shared`
 - Worker Hetzner provider: `worker/src/hetzner.ts`
 - Worker AWS EC2 provider: `worker/src/aws.ts`
-- Worker AWS AMI create/read/promote routes: `worker/src/fleet.ts`, `worker/src/aws.ts`
+- Worker provider image create/read/delete/promote routes: `worker/src/fleet.ts`, `worker/src/aws.ts`, `worker/src/azure.ts`, `worker/src/gcp.ts`
 - Provider feature docs: `docs/features/aws.md`, `docs/features/azure.md`, `docs/features/hetzner.md`, `docs/features/blacksmith-testbox.md`, `docs/features/namespace-devbox.md`, `docs/features/namespace-devbox-setup.md`, `docs/features/semaphore.md`, `docs/features/sprites.md`, `docs/features/daytona.md`, `docs/features/islo.md`, `docs/features/e2b.md`
 - Provider reference docs: `docs/providers/README.md`, `docs/providers/aws.md`, `docs/providers/azure.md`, `docs/providers/gcp.md`, `docs/providers/hetzner.md`, `docs/providers/proxmox.md`, `docs/providers/ssh.md`, `docs/providers/blacksmith-testbox.md`, `docs/providers/namespace-devbox.md`, `docs/providers/daytona.md`, `docs/providers/islo.md`, `docs/providers/semaphore.md`, `docs/providers/sprites.md`, `docs/providers/e2b.md`, `docs/providers/modal.md`, `docs/providers/tensorlake.md`
 - Provider/backend authoring guide: `docs/provider-backends.md`
@@ -99,6 +99,7 @@ repository-owned setup, usually through Actions hydration or repo scripts.
 - SSH command output and direct SSH touch behavior: `internal/cli/ssh.go`, `internal/cli/ssh_cmd.go`
 - Per-lease SSH known_hosts and ControlMaster config: `internal/cli/ssh.go`
 - GitHub Actions hydrate/register/dispatch bridge: `internal/cli/actions.go`
+- Workspace checkpoints: `internal/cli/checkpoint.go`
 - Cache stats/purge/warm commands: `internal/cli/cache.go`
 - Run history/event/attach/log commands and retained run logs: `internal/cli/history.go`, `internal/cli/run_recorder.go`, `internal/cli/run_output_events.go`, `internal/cli/runlog.go`
 - JUnit result parsing and remote markers: `internal/cli/results.go`, `internal/cli/results_parse.go`, `internal/cli/results_remote.go`

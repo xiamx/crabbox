@@ -98,6 +98,8 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 		return a.screenshot(ctx, helpArgs), true
 	case "artifacts":
 		return nil, false
+	case "checkpoint":
+		return nil, false
 	case "inspect":
 		return a.inspect(ctx, helpArgs), true
 	case "stop", "release":
@@ -157,10 +159,11 @@ Commands:
   list        List Crabbox machines
   share       Share a lease with users or the owning org
   unshare     Remove lease sharing
-  image       Create or promote brokered AWS runner images
+  image       Create provider images and promote brokered AWS runner images
   usage       Show cost and usage estimates by user, org, or fleet
   admin       Lease admin controls for trusted operators
   actions     Register GitHub Actions runners or dispatch workflows
+  checkpoint  Create, restore, and fork workspace checkpoints
   ssh         Print the SSH command for a lease
   vnc         Print or open VNC connection details for a desktop lease
   webvnc      Bridge a desktop lease into the authenticated web portal
@@ -205,6 +208,8 @@ Common Flows:
   crabbox warmup --actions-runner
   crabbox actions hydrate --id blue-lobster
   crabbox actions dispatch -f testbox_id=cbx_abcdef123456
+  crabbox checkpoint create --id blue-lobster --name after-install --mode native
+  crabbox checkpoint fork chk_abcdef1234567890 --class beast
   crabbox run --provider ssh --target macos --static-host mac.local -- echo ok
   crabbox run --provider ssh --target windows --windows-mode normal --static-host win.local -- pwsh -NoProfile -Command '$PSVersionTable'
   crabbox stop blue-lobster

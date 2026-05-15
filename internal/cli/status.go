@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -68,8 +69,14 @@ func (a App) status(ctx context.Context, args []string) error {
 			return err
 		}
 		if *jsonOut {
-			if !*wait || state.Ready {
-				return json.NewEncoder(a.Stdout).Encode(state)
+			if !*wait || statusWaitDone(state) {
+				if err := json.NewEncoder(a.Stdout).Encode(state); err != nil {
+					return err
+				}
+				if *wait {
+					return statusWaitTerminalError(*id, state)
+				}
+				return nil
 			}
 		} else {
 			tailscale := ""
@@ -82,13 +89,38 @@ func (a App) status(ctx context.Context, args []string) error {
 			}
 			fmt.Fprintf(a.Stdout, "%s slug=%s provider=%s target=%s windows_mode=%s state=%s type=%s host=%s network=%s%s ready=%t has_host=%t idle_for=%s idle_timeout=%s expires=%s%s\n", state.ID, blank(state.Slug, "-"), state.Provider, state.TargetOS, blank(state.WindowsMode, "-"), state.State, state.ServerType, state.Host, state.Network, tailscale, state.Ready, state.HasHost, blank(state.IdleFor, "-"), blank(state.IdleTimeout, "-"), blank(state.ExpiresAt, "-"), telemetry)
 		}
-		if !*wait || state.Ready {
+		if *wait {
+			if err := statusWaitTerminalError(*id, state); err != nil {
+				return err
+			}
+		}
+		if !*wait || statusWaitDone(state) {
 			return nil
 		}
 		if time.Now().After(deadline) {
 			return exit(5, "timed out waiting for %s to become ready", *id)
 		}
 		time.Sleep(5 * time.Second)
+	}
+}
+
+func statusWaitDone(state statusView) bool {
+	return state.Ready || statusTerminalState(state.State)
+}
+
+func statusWaitTerminalError(id string, state statusView) error {
+	if state.Ready || !statusTerminalState(state.State) {
+		return nil
+	}
+	return exit(5, "lease %s reached terminal state %s before ready", id, state.State)
+}
+
+func statusTerminalState(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "expired", "failed", "released", "stopped", "stopped_with_code", "terminated":
+		return true
+	default:
+		return false
 	}
 }
 

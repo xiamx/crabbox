@@ -8,6 +8,8 @@ It uses GitHub's runner and workflow APIs:
 - `actions hydrate` registers the runner, dispatches the configured workflow with the canonical lease label, waits for the workflow to write the hydrated workspace marker, and then returns.
 - `actions dispatch` calls `gh workflow run` for the configured workflow.
 
+Blacksmith Testbox IDs (`tbx_...`) and `--provider blacksmith-testbox` are skipped because Blacksmith owns Testbox workflow hydration. Run commands against those boxes with `crabbox run --provider blacksmith-testbox --id <tbx_id> -- ...`.
+
 For `actions hydrate`, Crabbox inspects the selected workflow's `workflow_dispatch.inputs` when the workflow path is available under `.github/workflows/`. It only sends declared inputs, requires `crabbox_id`, `crabbox_runner_label`, and `crabbox_keep_alive_minutes`, and treats `crabbox_job` as optional. If GitHub still rejects `crabbox_job` as an unexpected input, Crabbox retries once without it so older workflow refs remain usable.
 
 Runner names and extra labels use the friendly slug when available, but workflow inputs and state-file paths keep using the canonical `cbx_...` ID.

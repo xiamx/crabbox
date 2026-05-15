@@ -26,6 +26,7 @@ static SSH provider for existing machines.
 | [E2B](e2b.md) | delegated run | Linux | E2B-owned sandbox execution |
 | [Modal](modal.md) | delegated run | Linux | Modal Sandbox execution through the local Python client |
 | [Tensorlake](tensorlake.md) | delegated run | Linux | Tensorlake Firecracker sandbox execution via the `tensorlake` CLI |
+| [Cloudflare](cloudflare.md) | delegated run | Linux | Cloudflare execution through a Worker and container runner |
 
 ## Shared Rules
 
@@ -66,6 +67,8 @@ Proxmox and delegated providers do not use the Crabbox coordinator:
 - Modal uses the local Modal Python client and Modal Sandbox APIs.
 - Sprites uses the authenticated `sprite` CLI plus Sprites API.
 - Tensorlake uses the `tensorlake` CLI (`tensorlake sbx ...`) for sandbox lifecycle and command exec.
+- Cloudflare uses a deployed Worker runner backed by a Cloudflare
+  Containers image.
 
 Namespace Devbox and Semaphore are SSH lease providers that do not use the
 Crabbox coordinator. Namespace provisions through the authenticated `devbox`
@@ -91,6 +94,7 @@ through the Sprites API and reaches SSH through `sprite proxy`.
 | E2B | yes | yes | no | no | archive via E2B envd | no |
 | Modal | yes | yes | no | no | archive via Modal Sandbox exec | no |
 | Tensorlake | yes | yes | no | no | archive via `tensorlake sbx cp` | no |
+| Cloudflare | yes | yes | no | no | archive via Worker runner | no |
 
 Actions runner hydration requires a normal SSH lease on Linux and is core-over-SSH.
 Use AWS, Google Cloud, Hetzner, Proxmox, Static SSH, Namespace Devbox,

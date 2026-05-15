@@ -89,6 +89,7 @@ type Config struct {
 	Islo               IsloConfig
 	Tensorlake         TensorlakeConfig
 	Modal              ModalConfig
+	Cloudflare         CloudflareConfig
 	Semaphore          SemaphoreConfig
 	Sprites            SpritesConfig
 	Tailscale          TailscaleConfig
@@ -213,6 +214,12 @@ type ModalConfig struct {
 	Image   string
 	Workdir string
 	Python  string
+}
+
+type CloudflareConfig struct {
+	APIURL  string
+	Token   string
+	Workdir string
 }
 
 type ProxmoxConfig struct {
@@ -466,6 +473,9 @@ func baseConfig() Config {
 			Workdir: "/workspace/crabbox",
 			Python:  "python3",
 		},
+		Cloudflare: CloudflareConfig{
+			Workdir: "/workspace/crabbox",
+		},
 		Proxmox: ProxmoxConfig{
 			User:      "crabbox",
 			WorkRoot:  defaultPOSIXWorkRoot,
@@ -523,6 +533,7 @@ type fileConfig struct {
 	Islo             *fileIsloConfig          `yaml:"islo,omitempty"`
 	Tensorlake       *fileTensorlakeConfig    `yaml:"tensorlake,omitempty"`
 	Modal            *fileModalConfig         `yaml:"modal,omitempty"`
+	Cloudflare       *fileCloudflareConfig    `yaml:"cloudflare,omitempty"`
 	Semaphore        *fileSemaphoreConfig     `yaml:"semaphore,omitempty"`
 	Sprites          *fileSpritesConfig       `yaml:"sprites,omitempty"`
 	Tailscale        *fileTailscaleConfig     `yaml:"tailscale,omitempty"`
@@ -733,6 +744,27 @@ type fileModalConfig struct {
 	Image   string `yaml:"image,omitempty"`
 	Workdir string `yaml:"workdir,omitempty"`
 	Python  string `yaml:"python,omitempty"`
+}
+
+type fileCloudflareConfig struct {
+	APIURL  string `yaml:"apiUrl,omitempty"`
+	Token   string `yaml:"token,omitempty"`
+	Workdir string `yaml:"workdir,omitempty"`
+}
+
+func applyCloudflareFileConfig(cfg *Config, file *fileCloudflareConfig) {
+	if file == nil {
+		return
+	}
+	if file.APIURL != "" {
+		cfg.Cloudflare.APIURL = file.APIURL
+	}
+	if file.Token != "" {
+		cfg.Cloudflare.Token = file.Token
+	}
+	if file.Workdir != "" {
+		cfg.Cloudflare.Workdir = file.Workdir
+	}
 }
 
 type fileSemaphoreConfig struct {
@@ -1413,6 +1445,7 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 			cfg.Modal.Python = file.Modal.Python
 		}
 	}
+	applyCloudflareFileConfig(cfg, file.Cloudflare)
 	if file.Semaphore != nil {
 		if file.Semaphore.Host != "" {
 			cfg.Semaphore.Host = file.Semaphore.Host
@@ -1831,6 +1864,9 @@ func applyEnv(cfg *Config) {
 	cfg.Modal.Image = getenv("CRABBOX_MODAL_IMAGE", cfg.Modal.Image)
 	cfg.Modal.Workdir = getenv("CRABBOX_MODAL_WORKDIR", cfg.Modal.Workdir)
 	cfg.Modal.Python = getenv("CRABBOX_MODAL_PYTHON", cfg.Modal.Python)
+	cfg.Cloudflare.APIURL = getenv("CRABBOX_CLOUDFLARE_RUNNER_URL", cfg.Cloudflare.APIURL)
+	cfg.Cloudflare.Token = getenv("CRABBOX_CLOUDFLARE_RUNNER_TOKEN", cfg.Cloudflare.Token)
+	cfg.Cloudflare.Workdir = getenv("CRABBOX_CLOUDFLARE_WORKDIR", cfg.Cloudflare.Workdir)
 	cfg.Semaphore.Host = getenv("CRABBOX_SEMAPHORE_HOST", getenv("SEMAPHORE_HOST", cfg.Semaphore.Host))
 	cfg.Semaphore.Token = getenv("CRABBOX_SEMAPHORE_TOKEN", getenv("SEMAPHORE_API_TOKEN", cfg.Semaphore.Token))
 	cfg.Semaphore.Project = getenv("CRABBOX_SEMAPHORE_PROJECT", getenv("SEMAPHORE_PROJECT", cfg.Semaphore.Project))
@@ -1970,6 +2006,9 @@ func serverTypeForConfig(cfg Config) string {
 	if cfg.Provider == "daytona" {
 		return "snapshot"
 	}
+	if cfg.Provider == "cloudflare" {
+		return cloudflareContainerInstanceTypeForClass(cfg.Class)
+	}
 	if cfg.Provider == "aws" {
 		return awsInstanceTypeCandidatesForConfig(cfg)[0]
 	}
@@ -2003,6 +2042,9 @@ func serverTypeForProviderClass(provider, class string) string {
 	}
 	if provider == "daytona" {
 		return "snapshot"
+	}
+	if provider == "cloudflare" {
+		return cloudflareContainerInstanceTypeForClass(class)
 	}
 	if provider == "aws" {
 		return awsInstanceTypeCandidatesForClass(class)[0]
@@ -2052,6 +2094,44 @@ func namespaceDevboxSizeForClass(class string) string {
 		}
 		return strings.ToUpper(strings.TrimSpace(class))
 	}
+}
+
+func cloudflareContainerInstanceTypes() []string {
+	return []string{"lite", "basic", "standard-1", "standard-2", "standard-3", "standard-4"}
+}
+
+func CloudflareContainerInstanceTypes() []string {
+	return cloudflareContainerInstanceTypes()
+}
+
+func normalizeCloudflareContainerInstanceType(value string) (string, bool) {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	for _, instanceType := range cloudflareContainerInstanceTypes() {
+		if trimmed == instanceType {
+			return instanceType, true
+		}
+	}
+	return "", false
+}
+
+func NormalizeCloudflareContainerInstanceType(value string) (string, bool) {
+	return normalizeCloudflareContainerInstanceType(value)
+}
+
+func cloudflareContainerInstanceTypeForClass(class string) string {
+	switch strings.ToLower(strings.TrimSpace(class)) {
+	case "", "standard", "fast", "large", "beast":
+		return "standard-4"
+	default:
+		if instanceType, ok := normalizeCloudflareContainerInstanceType(class); ok {
+			return instanceType
+		}
+		return strings.TrimSpace(class)
+	}
+}
+
+func CloudflareContainerInstanceTypeForClass(class string) string {
+	return cloudflareContainerInstanceTypeForClass(class)
 }
 
 func serverTypeCandidatesForClass(class string) []string {

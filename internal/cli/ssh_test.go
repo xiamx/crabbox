@@ -24,8 +24,8 @@ func TestVersion(t *testing.T) {
 	if err := app.Run(context.Background(), []string{"--version"}); err != nil {
 		t.Fatalf("Run(--version) error: %v", err)
 	}
-	if got := strings.TrimSpace(out.String()); got != version {
-		t.Fatalf("Run(--version)=%q want %q", got, version)
+	if got := strings.TrimSpace(out.String()); got != currentVersion() {
+		t.Fatalf("Run(--version)=%q want %q", got, currentVersion())
 	}
 }
 
@@ -1112,6 +1112,57 @@ func TestAWSServerTypeForClass(t *testing.T) {
 	}
 }
 
+func TestCloudflareContainerInstanceTypeMapping(t *testing.T) {
+	tests := []struct {
+		class string
+		want  string
+	}{
+		{class: "", want: "standard-4"},
+		{class: "standard", want: "standard-4"},
+		{class: "fast", want: "standard-4"},
+		{class: "large", want: "standard-4"},
+		{class: "beast", want: "standard-4"},
+		{class: "lite", want: "lite"},
+		{class: "basic", want: "basic"},
+		{class: "standard-3", want: "standard-3"},
+	}
+	for _, tt := range tests {
+		if got := cloudflareContainerInstanceTypeForClass(tt.class); got != tt.want {
+			t.Fatalf("cloudflareContainerInstanceTypeForClass(%q)=%q want %q", tt.class, got, tt.want)
+		}
+		if got := CloudflareContainerInstanceTypeForClass(tt.class); got != tt.want {
+			t.Fatalf("CloudflareContainerInstanceTypeForClass(%q)=%q want %q", tt.class, got, tt.want)
+		}
+	}
+}
+
+func TestNormalizeCloudflareContainerInstanceType(t *testing.T) {
+	for _, valid := range CloudflareContainerInstanceTypes() {
+		got, ok := NormalizeCloudflareContainerInstanceType(" " + strings.ToUpper(valid) + " ")
+		if !ok || got != valid {
+			t.Fatalf("NormalizeCloudflareContainerInstanceType(%q)=(%q,%t), want (%q,true)", valid, got, ok, valid)
+		}
+	}
+	if got, ok := NormalizeCloudflareContainerInstanceType("ccx63"); ok || got != "" {
+		t.Fatalf("NormalizeCloudflareContainerInstanceType(ccx63)=(%q,%t), want empty,false", got, ok)
+	}
+}
+
+func TestCloudflareServerTypeForConfig(t *testing.T) {
+	tests := []struct {
+		cfg  Config
+		want string
+	}{
+		{cfg: Config{Provider: "cloudflare", Class: "standard"}, want: "standard-4"},
+		{cfg: Config{Provider: "cf", Class: "large"}, want: "standard-4"},
+	}
+	for _, tt := range tests {
+		if got := serverTypeForConfig(tt.cfg); got != tt.want {
+			t.Fatalf("serverTypeForConfig(%+v)=%q want %q", tt.cfg, got, tt.want)
+		}
+	}
+}
+
 func TestServerTypeForProviderClassDirectProviders(t *testing.T) {
 	tests := []struct {
 		provider string
@@ -1123,6 +1174,8 @@ func TestServerTypeForProviderClassDirectProviders(t *testing.T) {
 		{provider: "islo", class: "beast", want: ""},
 		{provider: "e2b", class: "beast", want: "base"},
 		{provider: "daytona", class: "beast", want: "snapshot"},
+		{provider: "cloudflare", class: "standard", want: "standard-4"},
+		{provider: "cf", class: "beast", want: "standard-4"},
 		{provider: "azure", class: "standard", want: "Standard_D32ads_v6"},
 		{provider: "google", class: "standard", want: "c4-standard-32"},
 		{provider: "google-cloud", class: "standard", want: "c4-standard-32"},

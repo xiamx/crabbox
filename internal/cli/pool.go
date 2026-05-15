@@ -19,6 +19,7 @@ func (a App) list(ctx context.Context, args []string) error {
 	fs := newFlagSet("list", a.Stderr)
 	provider := fs.String("provider", defaults.Provider, providerHelpAll())
 	jsonOut := fs.Bool("json", false, "print JSON")
+	refresh := fs.Bool("refresh", false, "refresh provider-backed state where supported")
 	providerFlags := registerProviderFlags(fs, defaults)
 	targetFlags := registerTargetFlags(fs, defaults)
 	if err := parseFlags(fs, args); err != nil {
@@ -41,7 +42,7 @@ func (a App) list(ctx context.Context, args []string) error {
 	}
 	if *jsonOut {
 		if jsonBackend, ok := backend.(JSONListBackend); ok {
-			view, err := jsonBackend.ListJSON(ctx, ListRequest{Options: leaseOptionsFromConfig(cfg)})
+			view, err := jsonBackend.ListJSON(ctx, ListRequest{Options: leaseOptionsFromConfig(cfg), Refresh: *refresh})
 			if err != nil {
 				return err
 			}
@@ -52,9 +53,9 @@ func (a App) list(ctx context.Context, args []string) error {
 	var servers []Server
 	switch b := backend.(type) {
 	case SSHLeaseBackend:
-		servers, err = b.List(ctx, ListRequest{Options: leaseOptionsFromConfig(cfg)})
+		servers, err = b.List(ctx, ListRequest{Options: leaseOptionsFromConfig(cfg), Refresh: *refresh})
 	case DelegatedRunBackend:
-		servers, err = b.List(ctx, ListRequest{Options: leaseOptionsFromConfig(cfg)})
+		servers, err = b.List(ctx, ListRequest{Options: leaseOptionsFromConfig(cfg), Refresh: *refresh})
 	default:
 		return exit(2, "provider=%s does not support list", backend.Spec().Name)
 	}
@@ -305,7 +306,7 @@ func coordinatorMachineOrphanField(labels map[string]string, activeLeaseIDs map[
 func (a App) cleanup(ctx context.Context, args []string) error {
 	defaults := defaultConfig()
 	fs := newFlagSet("machine cleanup", a.Stderr)
-	provider := fs.String("provider", defaults.Provider, "provider: hetzner, aws, azure, gcp, proxmox, or namespace-devbox")
+	provider := fs.String("provider", defaults.Provider, "provider: hetzner, aws, azure, gcp, proxmox, namespace-devbox, or cloudflare")
 	dryRun := fs.Bool("dry-run", false, "only print")
 	providerFlags := registerProviderFlags(fs, defaults)
 	targetFlags := registerTargetFlags(fs, defaults)

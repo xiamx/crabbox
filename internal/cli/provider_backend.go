@@ -92,6 +92,10 @@ const (
 	FeatureBrowser     Feature = "browser"
 	FeatureCode        Feature = "code"
 	FeatureTailscale   Feature = "tailscale"
+	FeatureCheckpoint  Feature = "workspace-checkpoint"
+	FeatureFork        Feature = "workspace-fork"
+	FeatureRestore     Feature = "workspace-restore"
+	FeatureSnapshot    Feature = "provider-snapshot"
 )
 
 type FeatureSet []Feature
@@ -207,6 +211,7 @@ type TouchRequest struct {
 type ListRequest struct {
 	Options LeaseOptions
 	All     bool
+	Refresh bool
 }
 
 type RunRequest struct {
@@ -327,7 +332,7 @@ func normalizeProviderName(name string) string {
 }
 
 func providerHelpAll() string {
-	return "provider: hetzner, aws, azure, gcp, proxmox, ssh, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, e2b, modal, or sprites"
+	return "provider: hetzner, aws, azure, gcp, proxmox, ssh, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, e2b, modal, sprites, or cloudflare"
 }
 
 func providerHelpSSH() string {

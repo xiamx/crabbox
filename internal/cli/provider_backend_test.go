@@ -24,9 +24,38 @@ func testRuntimeWithRunner(r CommandRunner) Runtime {
 }
 
 func TestProviderRegistryCanonicalAndAliases(t *testing.T) {
-	for _, name := range []string{"hetzner", "aws", "azure", "gcp", "google", "google-cloud", "proxmox", "ssh", "static", "static-ssh", "blacksmith", "blacksmith-testbox", "namespace", "namespace-devbox", "daytona", "islo", "e2b", "modal", "sprites"} {
-		if _, err := ProviderFor(name); err != nil {
-			t.Fatalf("ProviderFor(%q): %v", name, err)
+	for _, tc := range []struct {
+		name      string
+		canonical string
+	}{
+		{name: "hetzner", canonical: "hetzner"},
+		{name: "aws", canonical: "aws"},
+		{name: "azure", canonical: "azure"},
+		{name: "gcp", canonical: "gcp"},
+		{name: "google", canonical: "gcp"},
+		{name: "google-cloud", canonical: "gcp"},
+		{name: "proxmox", canonical: "proxmox"},
+		{name: "ssh", canonical: "ssh"},
+		{name: "static", canonical: "ssh"},
+		{name: "static-ssh", canonical: "ssh"},
+		{name: "blacksmith", canonical: "blacksmith-testbox"},
+		{name: "blacksmith-testbox", canonical: "blacksmith-testbox"},
+		{name: "namespace", canonical: "namespace-devbox"},
+		{name: "namespace-devbox", canonical: "namespace-devbox"},
+		{name: "daytona", canonical: "daytona"},
+		{name: "islo", canonical: "islo"},
+		{name: "e2b", canonical: "e2b"},
+		{name: "modal", canonical: "modal"},
+		{name: "cloudflare", canonical: "cloudflare"},
+		{name: "cf", canonical: "cloudflare"},
+		{name: "sprites", canonical: "sprites"},
+	} {
+		provider, err := ProviderFor(tc.name)
+		if err != nil {
+			t.Fatalf("ProviderFor(%q): %v", tc.name, err)
+		}
+		if provider.Name() != tc.canonical {
+			t.Fatalf("ProviderFor(%q).Name() = %q, want %q", tc.name, provider.Name(), tc.canonical)
 		}
 	}
 	if _, err := ProviderFor("missing"); err == nil {

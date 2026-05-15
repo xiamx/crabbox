@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.1 - Unreleased
+## 0.14.0 - 2026-05-15
 
 ### Added
 
@@ -15,7 +15,13 @@
 - Added a macOS image lifecycle `summary.json` artifact with the run phase, host id, lease ids, AMI id, and artifact paths for blocked, partial, and completed runs.
 - Added stable macOS image lifecycle evidence files for host discovery, allocation, image creation, and image promotion outputs.
 - Added `crabbox checkpoint` native disk-snapshot checkpoints for brokered AWS, Azure, and GCP Linux leases, optional provider image checkpoints via `--strategy image`, local workspace archives for generic POSIX SSH leases, inspect/list/delete flows, archive restore, and checkpoint forks into fresh leases.
+- Added checkpoint audit and cleanup management with `crabbox checkpoint list --verify`, `inspect --verify`, and `prune --older-than`.
+- Added `provider: cloudflare` delegated runs for Cloudflare Containers through a Worker runner, including archive sync, warm containers, local claim cleanup, and deployment docs. Thanks @altaywtf.
+- Added Cloudflare runner deploy-smoke tooling, CI coverage for the container runner Go module, and redacted `crabbox config show` output for Cloudflare runner auth.
+- Added `crabbox list --refresh` so local Cloudflare claims can be checked against live runner state on demand.
 - Added brokered provider snapshot/image deletion for AWS EBS snapshots and AMIs, Azure managed disk snapshots and managed images, and GCP disk snapshots and machine images.
+- Added Modal and Tensorlake to the top-level provider docs and delegated sandbox configuration examples. Thanks @stainlu.
+- Added provider feature flags for workspace checkpoint, fork, restore, and native snapshot capabilities. Thanks @stainlu.
 
 ### Changed
 
@@ -34,9 +40,22 @@
 - Fixed AWS macOS class fallback so `mac1.metal` can satisfy a request with a matching AMI when `mac2.metal` capacity is unavailable and no exact `--type` is set.
 - Fixed AWS image deletion so scoped promoted macOS images cannot be deleted until another image is promoted.
 - Fixed `crabbox admin lease-audit --fail-on-live` so recently terminated AWS instances returned by `DescribeInstances` do not fail cleanup automation as live resources.
+- Fixed checkpoint archive restores so large archives stream over SSH without buffering the full tarball in memory and unpack through a per-restore remote temp file. Thanks @stainlu.
+- Fixed Daytona toolbox archive sync so failed remote extracts still remove the uploaded `/tmp/crabbox-*.tgz` archive. Thanks @stainlu.
+- Fixed Islo exec-upload fallback cleanup so failed archive decodes or extracts still remove temporary upload files. Thanks @stainlu.
+- Fixed Cloudflare runner URL validation so configured runner URLs cannot include query or fragment components that corrupt API request paths. Thanks @stainlu.
+- Fixed Cloudflare stop so missing runner containers prune their stale local claims instead of leaving users to run cleanup manually. Thanks @stainlu.
+- Fixed the Crabbox plugin provider schema so current providers and aliases such as `modal`, `tensorlake`, and `cf` can be selected. Thanks @stainlu.
 - Fixed coordinator TTL cleanup so provider deletion failures keep leases active with retry metadata instead of silently expiring while cloud instances continue running.
 - Fixed direct AWS security-group maintenance so stale Crabbox-owned SSH ingress rules are pruned before adding the current source CIDRs.
+- Fixed E2B sync cleanup so remote upload archives are removed even when extraction fails. Thanks @stainlu.
+- Fixed Hetzner Cloud server-list parsing so `private_net` arrays from the API no longer break list, doctor, warmup, or reused-run flows. Thanks @muqsitnawaz.
+- Fixed installed tagged builds so `crabbox --version` and proof metadata report the Go module build version instead of the development fallback. Thanks @stainlu.
+- Fixed Modal sync cleanup so remote upload archives are removed even when extraction fails. Thanks @stainlu.
 - Fixed native provider checkpoint creation so AWS, Azure, and GCP snapshot/image checkpoints flush source filesystem writes before calling the provider API.
+- Fixed `crabbox actions hydrate --id tbx_...` so Blacksmith Testbox IDs skip owned-cloud runner registration instead of failing on GitHub self-hosted-runner permissions.
+- Fixed Tensorlake timing JSON so delegated runs include the lease slug and reused sandboxes preserve the stored claim slug. Thanks @stainlu.
+- Fixed Tensorlake workdir validation so broad sandbox paths are rejected before sync or command execution. Thanks @stainlu.
 
 ## 0.13.0 - 2026-05-13
 

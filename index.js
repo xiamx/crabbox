@@ -23,7 +23,35 @@ const envSchema = {
 
 const providerSchema = {
   type: "string",
-  enum: ["aws", "hetzner", "ssh", "blacksmith-testbox", "blacksmith", "namespace-devbox", "namespace", "semaphore", "sprites", "daytona", "islo", "e2b"],
+  enum: [
+    "aws",
+    "azure",
+    "gcp",
+    "google",
+    "google-cloud",
+    "hetzner",
+    "proxmox",
+    "ssh",
+    "static",
+    "static-ssh",
+    "blacksmith-testbox",
+    "blacksmith",
+    "namespace-devbox",
+    "namespace",
+    "namespace-devboxes",
+    "semaphore",
+    "sem",
+    "sprites",
+    "daytona",
+    "islo",
+    "e2b",
+    "modal",
+    "tensorlake",
+    "tl",
+    "tensorlake-sbx",
+    "cloudflare",
+    "cf",
+  ],
 };
 
 function readConfig(api) {
@@ -365,6 +393,10 @@ function registerList(api, config) {
       properties: {
         provider: providerSchema,
         json: { type: "boolean" },
+        refresh: {
+          type: "boolean",
+          description: "Pass --refresh.",
+        },
         timeoutSeconds: {
           type: "number",
           description: "Local wrapper timeout for this Crabbox CLI invocation.",
@@ -375,6 +407,7 @@ function registerList(api, config) {
       const args = ["list"];
       maybePush(args, "--provider", readString(params, "provider"));
       maybePushBool(args, "--json", params?.json);
+      maybePushBool(args, "--refresh", params?.refresh);
       return execute(config, args, params, signal);
     },
   });

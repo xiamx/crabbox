@@ -18,10 +18,11 @@ show [--json]
 set-broker --url <url> [--token-stdin] [--admin-token-stdin] [--provider hetzner|aws|azure|gcp]
 ```
 
-`config show` reports broker auth as `auth` and `admin_auth`, plus
-`access_auth` as `missing`, `service-token`, `token`, `service-token+token`, or
-`incomplete`, without printing secret values. Store broker tokens and Access
-secrets only in user config or environment variables, not repo-local config.
+`config show` reports broker auth as `auth` and `admin_auth`, Cloudflare runner
+auth as `cloudflare.auth`, plus `access_auth` as `missing`, `service-token`,
+`token`, `service-token+token`, or `incomplete`, without printing secret
+values. Store broker tokens, Cloudflare runner tokens, and Access secrets only
+in user config or environment variables, not repo-local config.
 User config is written with `0600` permissions, and `crabbox doctor` flags
 broader permissions.
 

@@ -267,6 +267,25 @@ Authenticate the local Modal Python client with `python3 -m modal setup` or
 `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET`. Repo config should select app/image and
 workdir only; tokens do not belong in YAML or command-line flags.
 
+### Cloudflare
+
+```yaml
+provider: cloudflare
+cloudflare:
+  apiUrl: https://crabbox-cloudflare-container-runner.example.workers.dev
+  workdir: /workspace/crabbox
+```
+
+Keep `CRABBOX_CLOUDFLARE_RUNNER_TOKEN` in the shell or credential manager.
+`CRABBOX_CLOUDFLARE_RUNNER_URL` can provide the runner URL from the
+environment. Repo config should select the runner URL and workdir, not hold
+bearer tokens.
+`crabbox config show` reports the runner URL, workdir, and token state as
+`cloudflare.auth` without printing the token.
+`--type` can select one of the instance types wired into the deployed runner.
+Update `worker/wrangler.cloudflare.jsonc` and redeploy the runner when changing
+available `instance_type` bindings or `max_instances`.
+
 ### Semaphore
 
 ```yaml

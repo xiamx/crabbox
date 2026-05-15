@@ -2,46 +2,30 @@ package cli
 
 import "testing"
 
-func TestLeaseStatusStateCanBeReadyRequiresActiveCoordinatorLease(t *testing.T) {
-	tests := []struct {
-		name  string
-		lease LeaseTarget
-		state string
-		want  bool
-	}{
-		{
-			name:  "coordinator active",
-			lease: LeaseTarget{Coordinator: &CoordinatorClient{}},
-			state: "active",
-			want:  true,
-		},
-		{
-			name:  "coordinator released",
-			lease: LeaseTarget{Coordinator: &CoordinatorClient{}},
-			state: "released",
-		},
-		{
-			name:  "coordinator expired",
-			lease: LeaseTarget{Coordinator: &CoordinatorClient{}},
-			state: "expired",
-		},
-		{
-			name:  "direct ready",
-			lease: LeaseTarget{},
-			state: "ready",
-			want:  true,
-		},
-		{
-			name:  "direct provisioning",
-			lease: LeaseTarget{},
-			state: "provisioning",
-		},
+func TestStatusWaitDoneTreatsTerminalStatesAsDone(t *testing.T) {
+	for _, state := range []string{"expired", "failed", "released", "stopped", "stopped_with_code", "terminated"} {
+		if !statusWaitDone(statusView{State: state}) {
+			t.Fatalf("statusWaitDone(%q) = false, want true", state)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := leaseStatusStateCanBeReady(tt.lease, tt.state); got != tt.want {
-				t.Fatalf("leaseStatusStateCanBeReady(%q)=%t, want %t", tt.state, got, tt.want)
-			}
-		})
+	if statusWaitDone(statusView{State: "provisioning"}) {
+		t.Fatal("statusWaitDone(provisioning) = true, want false")
+	}
+	if !statusWaitDone(statusView{State: "provisioning", Ready: true}) {
+		t.Fatal("statusWaitDone(ready provisioning) = false, want true")
+	}
+}
+
+func TestStatusWaitTerminalErrorFailsNonReadyTerminalState(t *testing.T) {
+	err := statusWaitTerminalError("cbx_123", statusView{State: "stopped"})
+	var exitErr ExitError
+	if !AsExitError(err, &exitErr) || exitErr.Code != 5 {
+		t.Fatalf("statusWaitTerminalError = %#v, want exit 5", err)
+	}
+	if err := statusWaitTerminalError("cbx_123", statusView{State: "stopped", Ready: true}); err != nil {
+		t.Fatalf("ready terminal state returned error: %v", err)
+	}
+	if err := statusWaitTerminalError("cbx_123", statusView{State: "provisioning"}); err != nil {
+		t.Fatalf("non-terminal state returned error: %v", err)
 	}
 }

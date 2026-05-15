@@ -159,6 +159,33 @@ func TestSupportsActionsRunnerTargetAllowsLinuxAndWSL2(t *testing.T) {
 	}
 }
 
+func TestShouldSkipBlacksmithActionsHydrateForTestboxID(t *testing.T) {
+	skipped, id, err := shouldSkipBlacksmithActionsHydrate("tbx_123", "aws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skipped || id != "tbx_123" {
+		t.Fatalf("skipped=%t id=%q", skipped, id)
+	}
+}
+
+func TestShouldSkipBlacksmithActionsHydrateForProvider(t *testing.T) {
+	skipped, id, err := shouldSkipBlacksmithActionsHydrate("blue-lobster", "blacksmith-testbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skipped || id != "blue-lobster" {
+		t.Fatalf("skipped=%t id=%q", skipped, id)
+	}
+}
+
+func TestGitHubRunnerRegistrationPermissionError(t *testing.T) {
+	err := exit(3, "gh api: exit status 1\n%s", "You must have repository write permissions or have the repository runners fine-grained permission. (HTTP 403)")
+	if !isGitHubRunnerRegistrationPermissionError(err) {
+		t.Fatalf("permission error not detected: %v", err)
+	}
+}
+
 func TestValidateActionsRunnerCapabilityAllowsWSL2(t *testing.T) {
 	backend := testSSHBackend{}
 	if err := validateActionsRunnerCapability(backend, Config{TargetOS: targetLinux}); err != nil {

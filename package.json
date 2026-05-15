@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/crabbox-plugin",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "OpenClaw plugin for running Crabbox remote testbox workflows",
   "license": "MIT",
   "type": "module",
@@ -14,10 +14,11 @@
     }
   },
   "scripts": {
-    "check": "node --check index.js && node --test index.test.js",
+    "cloudflare:deploy-smoke": "scripts/deploy-cloudflare-smoke.sh",
+    "check": "node --check index.js && node --test index.test.js scripts/*.test.js",
     "docs:check": "node scripts/check-command-docs.mjs && node scripts/check-docs-links.mjs && node scripts/build-docs-site.mjs",
     "live:auth": "CRABBOX_LIVE=1 scripts/live-auth-smoke.sh",
-    "test": "node --test index.test.js"
+    "test": "node --test index.test.js scripts/*.test.js"
   },
   "files": [
     "index.js",

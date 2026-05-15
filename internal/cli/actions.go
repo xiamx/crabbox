@@ -53,6 +53,24 @@ func (a App) actionsHydrate(ctx context.Context, args []string) error {
 	if *leaseIDFlag == "" {
 		return exit(2, "actions hydrate requires --id")
 	}
+	if skipped, skippedID, err := shouldSkipBlacksmithActionsHydrate(*leaseIDFlag, *provider); err != nil {
+		return err
+	} else if skipped {
+		fmt.Fprintf(a.Stdout, "actions hydrate skipped id=%s provider=blacksmith-testbox reason=provider-owned\n", skippedID)
+		fmt.Fprintf(a.Stdout, "actions hydrate complete total=%s\n", time.Since(started).Round(time.Millisecond))
+		if *timingJSON {
+			total := time.Since(started)
+			if err := writeTimingJSON(a.Stderr, timingReport{
+				Provider: "blacksmith-testbox",
+				LeaseID:  skippedID,
+				TotalMs:  total.Milliseconds(),
+				ExitCode: 0,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	cfg, err := loadLeaseTargetConfig(fs, *provider, targetFlags, networkFlags, leaseTargetConfigOptions{})
 	if err != nil {
 		return err
@@ -294,6 +312,20 @@ func supportsActionsRunnerTarget(target SSHTarget) bool {
 func (a App) resolveLeaseTargetForActions(ctx context.Context, cfg Config, id string) (Server, SSHTarget, string, string, error) {
 	server, target, leaseID, err := a.resolveLeaseTarget(ctx, cfg, id)
 	return server, target, leaseID, serverSlug(server), err
+}
+
+func shouldSkipBlacksmithActionsHydrate(identifier, provider string) (bool, string, error) {
+	if isBlacksmithProvider(provider) || strings.HasPrefix(identifier, "tbx_") {
+		return true, identifier, nil
+	}
+	claim, ok, err := resolveLeaseClaim(identifier)
+	if err != nil || !ok {
+		return false, "", err
+	}
+	if isBlacksmithProvider(claim.Provider) {
+		return true, claim.LeaseID, nil
+	}
+	return false, "", nil
 }
 
 func dispatchGitHubActionsWorkflow(ctx context.Context, dir string, repo GitHubRepo, workflow, ref string, fields []string) error {
@@ -681,6 +713,9 @@ sudo systemctl enable --now crabbox-actions-runner.service
 func githubActionsRegistrationToken(ctx context.Context, repo GitHubRepo) (string, error) {
 	out, err := ghOutput(ctx, "", "api", "-X", "POST", "repos/"+repo.Slug()+"/actions/runners/registration-token", "--jq", ".token")
 	if err != nil {
+		if isGitHubRunnerRegistrationPermissionError(err) {
+			return "", exit(3, "GitHub Actions runner registration for %s requires repository write access or fine-grained Self-hosted runners write permission. If this is a Blacksmith Testbox tbx_... id, skip actions hydrate and run with --provider blacksmith-testbox.", repo.Slug())
+		}
 		return "", err
 	}
 	token := strings.TrimSpace(out)
@@ -688,6 +723,13 @@ func githubActionsRegistrationToken(ctx context.Context, repo GitHubRepo) (strin
 		return "", exit(3, "GitHub returned an empty runner registration token for %s", repo.Slug())
 	}
 	return token, nil
+}
+
+func isGitHubRunnerRegistrationPermissionError(err error) bool {
+	text := err.Error()
+	return strings.Contains(text, "repository write permissions") ||
+		strings.Contains(text, "repository runners fine-grained permission") ||
+		strings.Contains(text, "HTTP 403")
 }
 
 func resolveGitHubRepo(repo Repo, override string) (GitHubRepo, error) {

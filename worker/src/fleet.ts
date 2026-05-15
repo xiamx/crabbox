@@ -3287,10 +3287,21 @@ export class FleetDurableObject implements DurableObject {
     const knownRegion = known?.region ?? "";
     const providerRegion = region || knownRegion;
     if (method === "GET" && action === undefined) {
-      const image = await this.provider(provider, providerRegion, project).getImage(
-        decodedImageID,
-        kind,
-      );
+      let image: ProviderImage;
+      try {
+        image = await this.provider(provider, providerRegion, project).getImage(
+          decodedImageID,
+          kind,
+        );
+      } catch (error) {
+        if (isProviderImageNotFound(error)) {
+          return json(
+            { error: "not_found", message: `image ${decodedImageID} not found` },
+            { status: 404 },
+          );
+        }
+        throw error;
+      }
       return json({ image: provider === "aws" ? mergeAWSImageMetadata(image, known) : image });
     }
     if (method === "DELETE" && action === undefined) {
@@ -4088,6 +4099,18 @@ function providerSupportsNativeImages(provider: Provider): boolean {
 function hasNativeLeaseSource(config: LeaseConfig): boolean {
   return Boolean(
     config.awsSnapshot || config.azureSnapshot || config.gcpMachineImage || config.gcpSnapshot,
+  );
+}
+
+function isProviderImageNotFound(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    message.includes("InvalidAMIID.NotFound") ||
+    message.includes("InvalidSnapshot.NotFound") ||
+    message.includes("ResourceNotFound") ||
+    message.includes("aws image not found") ||
+    message.includes("aws snapshot not found") ||
+    message.includes("http 404")
   );
 }
 

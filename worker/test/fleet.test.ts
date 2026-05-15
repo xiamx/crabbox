@@ -3150,6 +3150,26 @@ describe("fleet lease identity and idle", () => {
     expect(gcpDeletedKind).toBe("gcp-disk-snapshot");
   });
 
+  it("maps missing provider-native images to 404", async () => {
+    const fleet = testFleet(new MemoryStorage(), {
+      aws: fakeProvider(undefined, {
+        provider: "aws",
+        onGetImage() {
+          throw new Error("aws DescribeImages: http 400: InvalidAMIID.NotFound");
+        },
+      }),
+    });
+
+    const response = await fleet.fetch(
+      request("GET", "/v1/images/ami-000000000001?provider=aws", {
+        headers: { "x-crabbox-admin": "true" },
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ error: "not_found" });
+  });
+
   it("rejects invalid image provider query routing", async () => {
     let deleted = "";
     const fleet = testFleet(new MemoryStorage(), {
@@ -4478,6 +4498,7 @@ function fakeProvider(
       name: string,
       strategy?: "image" | "disk-snapshot",
     ) => void;
+    onGetImage?: (imageID: string, kind?: string) => Promise<ProviderImage> | ProviderImage;
     onDeleteImage?: (imageID: string, kind?: string) => void;
   } = {},
   onDelete?: (id: string) => Promise<void>,
@@ -4582,6 +4603,9 @@ function fakeProvider(
       };
     },
     async getImage(imageID: string, kind?: string) {
+      if (result.onGetImage) {
+        return await result.onGetImage(imageID, kind);
+      }
       const provider = result.provider ?? "aws";
       return {
         id: imageID,

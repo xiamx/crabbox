@@ -5,13 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -81,15 +82,17 @@ func (a App) checkpoint(ctx context.Context, args []string) error {
 	case "create":
 		return a.checkpointCreate(ctx, args[1:])
 	case "list":
-		return a.checkpointList(args[1:])
+		return a.checkpointList(ctx, args[1:])
 	case "inspect":
-		return a.checkpointInspect(args[1:])
+		return a.checkpointInspect(ctx, args[1:])
 	case "restore":
 		return a.checkpointRestore(ctx, args[1:])
 	case "fork":
 		return a.checkpointFork(ctx, args[1:])
 	case "delete":
-		return a.checkpointDelete(args[1:])
+		return a.checkpointDelete(ctx, args[1:])
+	case "prune":
+		return a.checkpointPrune(ctx, args[1:])
 	default:
 		return exit(2, "unknown checkpoint command %q", args[0])
 	}
@@ -103,6 +106,7 @@ func (a App) printCheckpointHelp() {
   crabbox checkpoint restore <checkpoint-id> --id <lease-id-or-slug> [--clear=false]
   crabbox checkpoint fork <checkpoint-id> [--class <class>] [--keep]
   crabbox checkpoint delete <checkpoint-id>
+  crabbox checkpoint prune --older-than <duration> [--kind native|archive] [--dry-run]
 
 Checkpoints use provider-native disk snapshots for brokered AWS, Azure, and GCP Linux leases, and portable workspace archives elsewhere.`)
 }
@@ -156,14 +160,29 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 	if err != nil {
 		return err
 	}
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		return err
+	}
+	createKind := checkpointCreateMode(*mode, *strategy, cfg, server, target, *recipeOnly)
+	switch createKind {
+	case checkpointKindRecipe, checkpointKindAWSAMI, checkpointKindAWSEBS, checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk, checkpointKindArchive:
+		record.Kind = createKind
+	default:
+		return exit(2, "checkpoint mode must be auto, native, or archive")
+	}
+	var paths checkpointPaths
+	record, paths, err = store.Reserve(record)
+	if err != nil {
+		return err
+	}
+	dir = paths.Dir
 	recordWritten := false
 	defer func() {
 		cleanupUncommittedCheckpointDir(dir, recordWritten, err)
 	}()
-	createKind := checkpointCreateMode(*mode, *strategy, cfg, server, target, *recipeOnly)
 	switch createKind {
 	case checkpointKindRecipe:
-		record.Kind = checkpointKindRecipe
 	case checkpointKindAWSAMI, checkpointKindAWSEBS, checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk:
 		image, err := a.createNativeCheckpoint(ctx, cfg, server, target, leaseID, record.Name, repo.Name, checkpointStrategyForKind(createKind), *noReboot, *wait, *waitTimeout)
 		if image.ID != "" {
@@ -171,7 +190,7 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 		}
 		if err != nil {
 			if record.Native.ImageID != "" {
-				if writeErr := writeCheckpointRecord(dir, record); writeErr != nil {
+				if writeErr := store.Write(record); writeErr != nil {
 					return writeErr
 				}
 				recordWritten = true
@@ -182,18 +201,14 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 		if err := ensureCheckpointArchiveTarget(target); err != nil {
 			return err
 		}
-		archivePath := filepath.Join(dir, checkpointArchive)
-		bytes, err := createCheckpointArchive(ctx, target, workdir, archivePath)
+		bytes, err := createCheckpointArchive(ctx, target, workdir, paths.Archive)
 		if err != nil {
 			return err
 		}
-		record.Kind = checkpointKindArchive
 		record.ArchivePath = checkpointArchive
 		record.ArchiveBytes = bytes
-	default:
-		return exit(2, "checkpoint mode must be auto, native, or archive")
 	}
-	if err := writeCheckpointRecord(dir, record); err != nil {
+	if err := store.Write(record); err != nil {
 		return err
 	}
 	recordWritten = true
@@ -205,15 +220,53 @@ func (a App) checkpointCreate(ctx context.Context, args []string) (err error) {
 	return nil
 }
 
-func (a App) checkpointList(args []string) error {
+type checkpointAudit struct {
+	Record        checkpointRecord `json:"record"`
+	LocalState    string           `json:"localState"`
+	ProviderState string           `json:"providerState,omitempty"`
+	NextAction    string           `json:"nextAction"`
+	Error         string           `json:"error,omitempty"`
+}
+
+func (a App) checkpointList(ctx context.Context, args []string) error {
 	fs := newFlagSet("checkpoint list", a.Stderr)
 	jsonOut := fs.Bool("json", false, "print JSON")
+	verify := fs.Bool("verify", false, "verify local artifacts and provider resources")
 	if err := parseInterspersedFlags(fs, args); err != nil {
 		return err
 	}
-	records, err := listCheckpointRecords()
+	store, err := defaultCheckpointStore()
 	if err != nil {
 		return err
+	}
+	records, err := store.List()
+	if err != nil {
+		return err
+	}
+	if *verify {
+		audits, err := a.verifyCheckpointRecords(ctx, store, records)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(a.Stdout).Encode(audits)
+		}
+		if len(audits) == 0 {
+			fmt.Fprintln(a.Stdout, "no checkpoints")
+			return nil
+		}
+		for _, audit := range audits {
+			record := audit.Record
+			extra := fmt.Sprintf("local=%s", audit.LocalState)
+			if audit.ProviderState != "" {
+				extra += fmt.Sprintf(" provider=%s", audit.ProviderState)
+			}
+			if audit.Error != "" {
+				extra += fmt.Sprintf(" error=%q", audit.Error)
+			}
+			fmt.Fprintf(a.Stdout, "%s kind=%s name=%q repo=%s lease=%s %s next=%s created=%s\n", record.ID, record.Kind, record.Name, record.Repo.Name, blank(record.LeaseID, "-"), extra, audit.NextAction, record.CreatedAt)
+		}
+		return nil
 	}
 	if *jsonOut {
 		return json.NewEncoder(a.Stdout).Encode(records)
@@ -232,35 +285,59 @@ func (a App) checkpointList(args []string) error {
 	return nil
 }
 
-func (a App) checkpointInspect(args []string) error {
+func (a App) checkpointInspect(ctx context.Context, args []string) error {
 	fs := newFlagSet("checkpoint inspect", a.Stderr)
 	jsonOut := fs.Bool("json", false, "print JSON")
+	verify := fs.Bool("verify", false, "verify local artifact or provider resource")
 	if err := parseInterspersedFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
 		return exit(2, "usage: crabbox checkpoint inspect <checkpoint-id>")
 	}
-	record, _, err := readCheckpointRecord(fs.Arg(0))
+	store, err := defaultCheckpointStore()
 	if err != nil {
 		return err
+	}
+	record, _, err := store.Read(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if *verify {
+		audit, err := a.verifyCheckpointRecord(ctx, store, record)
+		if err != nil {
+			return err
+		}
+		if *jsonOut {
+			return json.NewEncoder(a.Stdout).Encode(audit)
+		}
+		printCheckpointInspect(a.Stdout, record)
+		fmt.Fprintf(a.Stdout, "local_state=%s\nprovider_state=%s\nnext_action=%s\n", audit.LocalState, blank(audit.ProviderState, "-"), audit.NextAction)
+		if audit.Error != "" {
+			fmt.Fprintf(a.Stdout, "verify_error=%s\n", audit.Error)
+		}
+		return nil
 	}
 	if *jsonOut {
 		return json.NewEncoder(a.Stdout).Encode(record)
 	}
-	fmt.Fprintf(a.Stdout, "id=%s\nkind=%s\nname=%s\ncreated=%s\nprovider=%s\nlease=%s\nrepo=%s\nhead=%s\nworkdir=%s\narchive=%s\nbytes=%s\n",
+	printCheckpointInspect(a.Stdout, record)
+	return nil
+}
+
+func printCheckpointInspect(stdout io.Writer, record checkpointRecord) {
+	fmt.Fprintf(stdout, "id=%s\nkind=%s\nname=%s\ncreated=%s\nprovider=%s\nlease=%s\nrepo=%s\nhead=%s\nworkdir=%s\narchive=%s\nbytes=%s\n",
 		record.ID, record.Kind, blank(record.Name, "-"), record.CreatedAt, blank(record.Provider, "-"), blank(record.LeaseID, "-"), blank(record.Repo.Name, "-"), blank(record.Repo.Head, "-"), blank(record.Workdir, "-"), blank(record.ArchivePath, "-"), humanBytes(record.ArchiveBytes))
 	if isNativeCheckpointKind(record.Kind) {
-		fmt.Fprintf(a.Stdout, "resource=%s\nresource_name=%s\nresource_state=%s\nresource_region=%s\nstrategy=%s\nno_reboot=%t\n",
+		fmt.Fprintf(stdout, "resource=%s\nresource_name=%s\nresource_state=%s\nresource_region=%s\nstrategy=%s\nno_reboot=%t\n",
 			blank(record.Native.ImageID, "-"), blank(record.Native.Name, "-"), blank(record.Native.State, "-"), blank(record.Native.Region, "-"), blank(record.Native.Strategy, checkpointStrategyImage), record.Native.NoReboot)
 		if record.Native.Project != "" {
-			fmt.Fprintf(a.Stdout, "image_project=%s\n", record.Native.Project)
+			fmt.Fprintf(stdout, "image_project=%s\n", record.Native.Project)
 		}
 		if record.Native.Resource != "" {
-			fmt.Fprintf(a.Stdout, "image_resource=%s\n", record.Native.Resource)
+			fmt.Fprintf(stdout, "image_resource=%s\n", record.Native.Resource)
 		}
 	}
-	return nil
 }
 
 func (a App) checkpointRestore(ctx context.Context, args []string) error {
@@ -279,7 +356,11 @@ func (a App) checkpointRestore(ctx context.Context, args []string) error {
 	if fs.NArg() != 1 {
 		return exit(2, "usage: crabbox checkpoint restore <checkpoint-id> --id <lease-id-or-slug>")
 	}
-	record, dir, err := readCheckpointRecord(fs.Arg(0))
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		return err
+	}
+	record, paths, err := store.Read(fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -311,7 +392,7 @@ func (a App) checkpointRestore(ctx context.Context, args []string) error {
 	if workdir == "" {
 		workdir = defaultCheckpointRestoreWorkdir(cfg, leaseID, repo.Name, record.Workdir)
 	}
-	if err := restoreCheckpointArchive(ctx, target, filepath.Join(dir, record.ArchivePath), record.ID, workdir, *clear); err != nil {
+	if err := restoreCheckpointArchive(ctx, target, checkpointArchivePath(paths, record), record.ID, workdir, *clear); err != nil {
 		return err
 	}
 	fmt.Fprintf(a.Stdout, "checkpoint restored id=%s lease=%s workdir=%s\n", record.ID, leaseID, workdir)
@@ -332,7 +413,11 @@ func (a App) checkpointFork(ctx context.Context, args []string) (err error) {
 	if fs.NArg() != 1 {
 		return exit(2, "usage: crabbox checkpoint fork <checkpoint-id> [--class <class>]")
 	}
-	record, dir, err := readCheckpointRecord(fs.Arg(0))
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		return err
+	}
+	record, paths, err := store.Read(fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -343,11 +428,15 @@ func (a App) checkpointFork(ctx context.Context, args []string) (err error) {
 	if err := applyLeaseCreateFlags(&cfg, fs, leaseFlags); err != nil {
 		return err
 	}
-	if isNativeCheckpointKind(record.Kind) {
-		applyNativeCheckpointForkConfig(&cfg, fs, record)
-	}
-	if record.Kind != checkpointKindArchive && !isNativeCheckpointKind(record.Kind) {
+	nativeCheckpoint := isNativeCheckpointKind(record.Kind)
+	if record.Kind != checkpointKindArchive && !nativeCheckpoint {
 		return exit(2, "checkpoint %s has kind=%s; fork requires %s or a native image checkpoint", record.ID, record.Kind, checkpointKindArchive)
+	}
+	if nativeCheckpoint {
+		if nativeCheckpointResourceID(record) == "" {
+			return exit(2, "checkpoint %s is pending; native provider resource is not recorded yet", record.ID)
+		}
+		applyNativeCheckpointForkConfig(&cfg, fs, record)
 	}
 	repo, err := findRepo()
 	if err != nil {
@@ -391,14 +480,14 @@ func (a App) checkpointFork(ctx context.Context, args []string) (err error) {
 			a.releaseBackendLeaseBestEffort(ctx, sshBackend, LeaseTarget{Server: server, SSH: target, LeaseID: leaseID, Coordinator: lease.Coordinator})
 			return err
 		}
-		fmt.Fprintf(a.Stdout, "checkpoint forked id=%s lease=%s slug=%s image=%s workdir=%s\n", record.ID, leaseID, blank(serverSlug(server), "-"), record.Native.ImageID, workdir)
+		fmt.Fprintf(a.Stdout, "checkpoint forked id=%s lease=%s slug=%s image=%s workdir=%s\n", record.ID, leaseID, blank(serverSlug(server), "-"), nativeCheckpointResourceID(record), workdir)
 		return nil
 	}
 	workdir := strings.TrimSpace(*workdirOverride)
 	if workdir == "" {
 		workdir = defaultCheckpointRestoreWorkdir(cfg, leaseID, repo.Name, record.Workdir)
 	}
-	if err := restoreCheckpointArchive(ctx, target, filepath.Join(dir, record.ArchivePath), record.ID, workdir, *clear); err != nil {
+	if err := restoreCheckpointArchive(ctx, target, checkpointArchivePath(paths, record), record.ID, workdir, *clear); err != nil {
 		a.releaseBackendLeaseBestEffort(ctx, sshBackend, LeaseTarget{Server: server, SSH: target, LeaseID: leaseID, Coordinator: lease.Coordinator})
 		return err
 	}
@@ -406,7 +495,7 @@ func (a App) checkpointFork(ctx context.Context, args []string) (err error) {
 	return nil
 }
 
-func (a App) checkpointDelete(args []string) error {
+func (a App) checkpointDelete(ctx context.Context, args []string) error {
 	fs := newFlagSet("checkpoint delete", a.Stderr)
 	localOnly := fs.Bool("local-only", false, "delete only the local checkpoint record")
 	if err := parseInterspersedFlags(fs, args); err != nil {
@@ -419,28 +508,234 @@ func (a App) checkpointDelete(args []string) error {
 	if err != nil {
 		return err
 	}
-	record, _, err := readCheckpointRecord(id)
+	store, err := defaultCheckpointStore()
 	if err != nil {
 		return err
 	}
-	if isNativeCheckpointKind(record.Kind) && record.Native.ImageID != "" && !*localOnly {
+	if err := deleteCheckpoint(ctx, store, id, *localOnly); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Stdout, "checkpoint deleted id=%s\n", id)
+	return nil
+}
+
+func deleteCheckpoint(ctx context.Context, store checkpointStore, id string, localOnly bool) error {
+	record, _, err := store.Read(id)
+	if err != nil {
+		return err
+	}
+	providerID := nativeCheckpointDeleteID(record)
+	if isNativeCheckpointKind(record.Kind) && providerID != "" && !localOnly {
 		coord, err := configuredAdminCoordinator()
 		if err != nil {
 			return err
 		}
-		if err := coord.DeleteImage(context.Background(), record.Native.ImageID, nativeCoordinatorImageRef(record)); err != nil {
+		if err := coord.DeleteImage(ctx, providerID, nativeCoordinatorImageRef(record)); err != nil {
 			return err
 		}
 	}
-	dir, err := checkpointDir(id)
+	return store.Delete(id)
+}
+
+func (a App) checkpointPrune(ctx context.Context, args []string) error {
+	fs := newFlagSet("checkpoint prune", a.Stderr)
+	olderThan := fs.String("older-than", "", "delete checkpoints older than this duration")
+	kind := fs.String("kind", "", "checkpoint kind filter: native or archive")
+	dryRun := fs.Bool("dry-run", false, "print checkpoints that would be deleted")
+	localOnly := fs.Bool("local-only", false, "delete local checkpoint records without deleting provider resources")
+	if err := parseInterspersedFlags(fs, args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return exit(2, "usage: crabbox checkpoint prune --older-than <duration> [--kind native|archive] [--dry-run]")
+	}
+	pruneAge, err := parseCheckpointPruneDuration(*olderThan)
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(dir); err != nil {
-		return exit(2, "delete checkpoint %s: %v", id, err)
+	if pruneAge <= 0 {
+		return exit(2, "usage: crabbox checkpoint prune --older-than <duration> [--kind native|archive] [--dry-run]")
 	}
-	fmt.Fprintf(a.Stdout, "checkpoint deleted id=%s\n", id)
+	kindFilter := strings.TrimSpace(*kind)
+	if kindFilter != "" && kindFilter != "native" && kindFilter != "archive" {
+		return exit(2, "--kind must be native or archive")
+	}
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		return err
+	}
+	records, err := store.List()
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().Add(-pruneAge)
+	matched := 0
+	for _, record := range records {
+		created, err := time.Parse(time.RFC3339, record.CreatedAt)
+		if err != nil {
+			return exit(2, "checkpoint %s has invalid createdAt: %v", record.ID, err)
+		}
+		if !created.Before(cutoff) || !checkpointMatchesPruneKind(record, kindFilter) {
+			continue
+		}
+		matched++
+		if *dryRun {
+			fmt.Fprintf(a.Stdout, "would delete id=%s kind=%s created=%s\n", record.ID, record.Kind, record.CreatedAt)
+			continue
+		}
+		if err := deleteCheckpoint(ctx, store, record.ID, *localOnly); err != nil {
+			return err
+		}
+		fmt.Fprintf(a.Stdout, "checkpoint pruned id=%s kind=%s created=%s\n", record.ID, record.Kind, record.CreatedAt)
+	}
+	if matched == 0 {
+		fmt.Fprintln(a.Stdout, "no checkpoints matched prune criteria")
+	}
 	return nil
+}
+
+func parseCheckpointPruneDuration(value string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	if strings.HasSuffix(trimmed, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(trimmed, "d"))
+		if err != nil || days <= 0 {
+			return 0, exit(2, "--older-than day duration must be a positive integer")
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	duration, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return 0, exit(2, "parse --older-than: %v", err)
+	}
+	return duration, nil
+}
+
+func checkpointMatchesPruneKind(record checkpointRecord, kind string) bool {
+	switch kind {
+	case "":
+		return true
+	case "native":
+		return isNativeCheckpointKind(record.Kind)
+	case "archive":
+		return record.Kind == checkpointKindArchive
+	default:
+		return false
+	}
+}
+
+func (a App) verifyCheckpointRecords(ctx context.Context, store checkpointStore, records []checkpointRecord) ([]checkpointAudit, error) {
+	audits := make([]checkpointAudit, 0, len(records))
+	for _, record := range records {
+		audit, err := a.verifyCheckpointRecord(ctx, store, record)
+		if err != nil {
+			return nil, err
+		}
+		audits = append(audits, audit)
+	}
+	return audits, nil
+}
+
+func (a App) verifyCheckpointRecord(ctx context.Context, store checkpointStore, record checkpointRecord) (checkpointAudit, error) {
+	audit := checkpointAudit{
+		Record:     record,
+		LocalState: "metadata_available",
+		NextAction: "inspect",
+	}
+	paths, err := store.Paths(record.ID)
+	if err != nil {
+		return checkpointAudit{}, err
+	}
+	switch {
+	case record.Kind == checkpointKindArchive:
+		archivePath := checkpointArchivePath(paths, record)
+		info, err := os.Stat(archivePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				audit.LocalState = "missing_archive"
+				audit.ProviderState = "not_applicable"
+				audit.NextAction = "delete_or_recreate"
+				return audit, nil
+			}
+			return checkpointAudit{}, exit(2, "stat checkpoint archive %s: %v", record.ID, err)
+		}
+		if info.IsDir() {
+			audit.LocalState = "invalid_archive"
+			audit.ProviderState = "not_applicable"
+			audit.NextAction = "delete_or_recreate"
+			return audit, nil
+		}
+		audit.LocalState = "available"
+		audit.ProviderState = "not_applicable"
+		audit.NextAction = "restore_or_fork"
+		return audit, nil
+	case isNativeCheckpointKind(record.Kind):
+		providerID := strings.TrimSpace(record.Native.ImageID)
+		if providerID == "" {
+			if nativeCheckpointResourceID(record) != "" {
+				audit.ProviderState = "unverified_ref"
+				audit.NextAction = "fork_or_delete_local"
+				return audit, nil
+			}
+			audit.ProviderState = "missing_ref"
+			audit.NextAction = "delete_local"
+			return audit, nil
+		}
+		coord, err := configuredAdminCoordinator()
+		if err != nil {
+			audit.ProviderState = "unknown"
+			audit.NextAction = "configure_admin_auth"
+			audit.Error = err.Error()
+			return audit, nil
+		}
+		image, err := coord.Image(ctx, providerID, nativeCoordinatorImageRef(record))
+		if err != nil {
+			if coordinatorStatusCode(err) == 404 {
+				audit.ProviderState = "missing"
+				audit.NextAction = "delete_local"
+				return audit, nil
+			}
+			audit.ProviderState = "unknown"
+			audit.NextAction = "check_auth_or_provider"
+			audit.Error = err.Error()
+			return audit, nil
+		}
+		audit.ProviderState = blank(image.State, "unknown")
+		switch strings.ToLower(image.State) {
+		case "available", "ready", "succeeded", "completed":
+			audit.NextAction = "fork_or_delete"
+		case "failed", "invalid":
+			audit.NextAction = "delete"
+		default:
+			audit.NextAction = "wait_or_delete"
+		}
+		return audit, nil
+	default:
+		audit.LocalState = "metadata_only"
+		audit.ProviderState = "not_applicable"
+		audit.NextAction = "inspect"
+		return audit, nil
+	}
+}
+
+func checkpointArchivePath(paths checkpointPaths, record checkpointRecord) string {
+	if record.ArchivePath == "" {
+		return paths.Archive
+	}
+	if filepath.IsAbs(record.ArchivePath) {
+		return record.ArchivePath
+	}
+	return filepath.Join(paths.Dir, record.ArchivePath)
+}
+
+func coordinatorStatusCode(err error) int {
+	var httpErr CoordinatorHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode
+	}
+	return 0
 }
 
 func applyNativeImageCheckpointRecord(record *checkpointRecord, image CoordinatorImage, noReboot bool) {
@@ -459,6 +754,27 @@ func applyNativeImageCheckpointRecord(record *checkpointRecord, image Coordinato
 
 func applyAWSAMIImageCheckpointRecord(record *checkpointRecord, image CoordinatorImage, noReboot bool) {
 	applyNativeImageCheckpointRecord(record, image, noReboot)
+}
+
+func nativeCheckpointResourceID(record checkpointRecord) string {
+	switch record.Kind {
+	case checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk:
+		return firstNonBlank(record.Native.Resource, record.Native.ImageID)
+	default:
+		return record.Native.ImageID
+	}
+}
+
+func nativeCheckpointDeleteID(record checkpointRecord) string {
+	if imageID := strings.TrimSpace(record.Native.ImageID); imageID != "" {
+		return imageID
+	}
+	switch record.Kind {
+	case checkpointKindAzure, checkpointKindAzureOS, checkpointKindGCP, checkpointKindGCPDisk:
+		return strings.TrimSpace(record.Native.Resource)
+	default:
+		return ""
+	}
 }
 
 func checkpointKindForProviderImage(image CoordinatorImage) string {
@@ -494,7 +810,7 @@ func newCheckpointRecord(repo Repo, cfg Config, server Server, target SSHTarget,
 		Name:           strings.TrimSpace(name),
 		Kind:           checkpointKindArchive,
 		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
-		CrabboxVersion: version,
+		CrabboxVersion: currentVersion(),
 		Provider:       firstNonBlank(server.Provider, cfg.Provider),
 		LeaseID:        leaseID,
 		Slug:           serverSlug(server),
@@ -757,7 +1073,7 @@ func applyAWSAMICheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record check
 
 func nativeCoordinatorImageRef(record checkpointRecord) CoordinatorImageRef {
 	return CoordinatorImageRef{
-		Provider: firstNonBlank(record.Native.Provider, record.Provider),
+		Provider: firstNonBlank(record.Native.Provider, checkpointProviderForKind(record.Kind), record.Provider),
 		Region:   record.Native.Region,
 		Project:  record.Native.Project,
 		Kind:     firstNonBlank(record.Native.Kind, record.Kind),
@@ -838,98 +1154,6 @@ func validateCheckpointID(value string) (string, error) {
 	return id, nil
 }
 
-func checkpointRootDir() (string, error) {
-	stateDir, err := crabboxStateDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(stateDir, "checkpoints"), nil
-}
-
-func checkpointDir(id string) (string, error) {
-	id, err := validateCheckpointID(id)
-	if err != nil {
-		return "", err
-	}
-	root, err := checkpointRootDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, id), nil
-}
-
-func writeCheckpointRecord(dir string, record checkpointRecord) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return exit(2, "create checkpoint directory: %v", err)
-	}
-	data, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return exit(2, "encode checkpoint %s: %v", record.ID, err)
-	}
-	data = append(data, '\n')
-	path := filepath.Join(dir, checkpointMetaFile)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return exit(2, "write checkpoint %s: %v", record.ID, err)
-	}
-	return nil
-}
-
-func readCheckpointRecord(id string) (checkpointRecord, string, error) {
-	dir, err := checkpointDir(id)
-	if err != nil {
-		return checkpointRecord{}, "", err
-	}
-	data, err := os.ReadFile(filepath.Join(dir, checkpointMetaFile))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return checkpointRecord{}, "", exit(2, "checkpoint %s not found", id)
-		}
-		return checkpointRecord{}, "", exit(2, "read checkpoint %s: %v", id, err)
-	}
-	var record checkpointRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return checkpointRecord{}, "", exit(2, "parse checkpoint %s: %v", id, err)
-	}
-	if record.ID == "" {
-		record.ID = filepath.Base(dir)
-	}
-	return record, dir, nil
-}
-
-func listCheckpointRecords() ([]checkpointRecord, error) {
-	root, err := checkpointRootDir()
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, exit(2, "read checkpoints: %v", err)
-	}
-	records := []checkpointRecord{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		record, _, err := readCheckpointRecord(entry.Name())
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	sort.Slice(records, func(i, j int) bool {
-		left, leftErr := time.Parse(time.RFC3339, records[i].CreatedAt)
-		right, rightErr := time.Parse(time.RFC3339, records[j].CreatedAt)
-		if leftErr == nil && rightErr == nil && !left.Equal(right) {
-			return left.After(right)
-		}
-		return records[i].ID > records[j].ID
-	})
-	return records, nil
-}
-
 func ensureCheckpointArchiveTarget(target SSHTarget) error {
 	if isWindowsNativeTarget(target) {
 		return exit(2, "workspace-archive checkpoints currently require POSIX SSH targets; use Windows WSL2 or a Linux/macOS lease")
@@ -998,20 +1222,14 @@ func restoreCheckpointArchive(ctx context.Context, target SSHTarget, localPath, 
 	if info.IsDir() {
 		return exit(2, "checkpoint archive is a directory: %s", localPath)
 	}
-	remotePath := "/tmp/crabbox-" + safeCaptureName(checkpointID) + ".tar.gz"
 	file, err := os.Open(localPath)
 	if err != nil {
 		return exit(2, "open checkpoint archive: %v", err)
 	}
 	defer func() { _ = file.Close() }()
-	if err := runSSHInput(ctx, target, "cat > "+shellQuote(remotePath), file, io.Discard, io.Discard); err != nil {
-		return exit(7, "upload checkpoint archive %s: %v", checkpointID, err)
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	if out, err := runSSHCombinedOutput(ctx, target, remoteCheckpointRestoreCommand(workdir, remotePath, clear)); err != nil {
-		return exit(7, "restore checkpoint %s: %v: %s", checkpointID, err, trimFailureDetail(out))
+	var stderr strings.Builder
+	if err := runSSHInputStream(ctx, target, remoteCheckpointRestoreCommand(workdir, clear), file, io.Discard, &stderr); err != nil {
+		return exit(7, "restore checkpoint %s: %v: %s", checkpointID, err, trimFailureDetail(stderr.String()))
 	}
 	return nil
 }
@@ -1023,9 +1241,13 @@ func remoteCheckpointArchiveCommand(workdir string) string {
 	return "bash -lc " + shellQuote(script)
 }
 
-func remoteCheckpointRestoreCommand(workdir, archivePath string, clear bool) string {
+func remoteCheckpointRestoreCommand(workdir string, clear bool) string {
 	var b strings.Builder
 	b.WriteString("set -eu\n")
+	b.WriteString("tmp=$(mktemp /tmp/crabbox-checkpoint.XXXXXX)\n")
+	b.WriteString("cleanup() { rm -f -- \"$tmp\"; }\n")
+	b.WriteString("trap cleanup EXIT INT TERM\n")
+	b.WriteString("cat > \"$tmp\"\n")
 	b.WriteString("mkdir -p ")
 	b.WriteString(shellQuote(workdir))
 	b.WriteByte('\n')
@@ -1036,11 +1258,7 @@ func remoteCheckpointRestoreCommand(workdir, archivePath string, clear bool) str
 	}
 	b.WriteString("tar -C ")
 	b.WriteString(shellQuote(workdir))
-	b.WriteString(" -xzf ")
-	b.WriteString(shellQuote(archivePath))
-	b.WriteByte('\n')
-	b.WriteString("rm -f -- ")
-	b.WriteString(shellQuote(archivePath))
+	b.WriteString(" -xzf \"$tmp\"")
 	return "bash -lc " + shellQuote(b.String())
 }
 

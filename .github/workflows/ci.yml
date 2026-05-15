@@ -48,6 +48,9 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      - name: Test all Go modules
+        run: scripts/test-go-modules.sh
+
       - name: Coverage
         run: scripts/check-go-coverage.sh 90.0
 

@@ -262,6 +262,7 @@ Before tagging a release:
   `package.json`, `worker/package.json`, and `worker/package-lock.json`.
 - `go vet ./...`
 - `go test -race ./...`
+- `scripts/test-go-modules.sh`
 - `go build -trimpath -o bin/crabbox ./cmd/crabbox`
 - `scripts/check-go-coverage.sh 90.0`
 - Worker format, lint, typecheck, tests, and build:

@@ -3,11 +3,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateCheckpointID(t *testing.T) {
@@ -25,11 +29,7 @@ func TestValidateCheckpointID(t *testing.T) {
 
 func TestCheckpointRecordRoundTripAndListOrder(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	firstDir, err := checkpointDir("chk_first")
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondDir, err := checkpointDir("chk_second")
+	store, err := defaultCheckpointStore()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,20 +43,20 @@ func TestCheckpointRecordRoundTripAndListOrder(t *testing.T) {
 	second := first
 	second.ID = "chk_second"
 	second.CreatedAt = "2026-05-13T11:00:00Z"
-	if err := writeCheckpointRecord(firstDir, first); err != nil {
+	if _, err := store.Create(first); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointRecord(secondDir, second); err != nil {
+	if _, err := store.Create(second); err != nil {
 		t.Fatal(err)
 	}
-	records, err := listCheckpointRecords()
+	records, err := store.List()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(records) != 2 || records[0].ID != "chk_second" || records[1].ID != "chk_first" {
 		t.Fatalf("unexpected order: %#v", records)
 	}
-	got, _, err := readCheckpointRecord("chk_first")
+	got, _, err := store.Read("chk_first")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestCheckpointDeleteReturnsMetadataReadError(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	app := App{Stdout: &stdout, Stderr: io.Discard}
-	if err := app.checkpointDelete([]string{"chk_missing"}); err == nil {
+	if err := app.checkpointDelete(context.Background(), []string{"chk_missing"}); err == nil {
 		t.Fatal("expected missing checkpoint delete to fail")
 	}
 	if stdout.String() != "" {
@@ -119,11 +119,157 @@ func TestCheckpointDeleteKeepsCorruptRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := App{Stdout: io.Discard, Stderr: io.Discard}
-	if err := app.checkpointDelete([]string{"chk_corrupt"}); err == nil {
+	if err := app.checkpointDelete(context.Background(), []string{"chk_corrupt"}); err == nil {
 		t.Fatal("expected corrupt checkpoint delete to fail")
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("corrupt checkpoint dir removed: %v", err)
+	}
+}
+
+func TestCheckpointInspectVerifyArchiveStates(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.Create(checkpointRecord{
+		ID:          "chk_archive",
+		Kind:        checkpointKindArchive,
+		CreatedAt:   "2026-05-13T10:00:00Z",
+		ArchivePath: checkpointArchive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := store.Paths(record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.Archive, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.checkpointInspect(context.Background(), []string{record.ID, "--verify", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	var audit checkpointAudit
+	if err := json.Unmarshal(stdout.Bytes(), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit.LocalState != "available" || audit.ProviderState != "not_applicable" || audit.NextAction != "restore_or_fork" {
+		t.Fatalf("audit=%#v", audit)
+	}
+
+	if err := os.Remove(paths.Archive); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err := app.checkpointInspect(context.Background(), []string{record.ID, "--verify", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit.LocalState != "missing_archive" || audit.NextAction != "delete_or_recreate" {
+		t.Fatalf("missing archive audit=%#v", audit)
+	}
+}
+
+func TestCheckpointPruneDryRunAndDelete(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRecord, err := store.Create(checkpointRecord{
+		ID:        "chk_old",
+		Kind:      checkpointKindArchive,
+		CreatedAt: time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(checkpointRecord{
+		ID:        "chk_new",
+		Kind:      checkpointKindArchive,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.checkpointPrune(context.Background(), []string{"--older-than", "24h", "--kind", "archive", "--dry-run"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "would delete id=chk_old") {
+		t.Fatalf("dry-run stdout=%q", stdout.String())
+	}
+	if _, _, err := store.Read(oldRecord.ID); err != nil {
+		t.Fatalf("dry-run deleted checkpoint: %v", err)
+	}
+
+	stdout.Reset()
+	if err := app.checkpointPrune(context.Background(), []string{"--older-than", "24h", "--kind", "archive"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "checkpoint pruned id=chk_old") {
+		t.Fatalf("prune stdout=%q", stdout.String())
+	}
+	if _, _, err := store.Read(oldRecord.ID); err == nil {
+		t.Fatal("old checkpoint still exists")
+	}
+	if _, _, err := store.Read("chk_new"); err != nil {
+		t.Fatalf("new checkpoint removed: %v", err)
+	}
+}
+
+func TestCheckpointPruneRejectsOperands(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(checkpointRecord{
+		ID:        "chk_old",
+		Kind:      checkpointKindArchive,
+		CreatedAt: time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	app := App{Stdout: io.Discard, Stderr: io.Discard}
+	if err := app.checkpointPrune(context.Background(), []string{"chk_old", "--older-than", "24h"}); err == nil {
+		t.Fatal("expected unexpected operand error")
+	}
+	if _, _, err := store.Read("chk_old"); err != nil {
+		t.Fatalf("checkpoint removed after invalid prune command: %v", err)
+	}
+}
+
+func TestNewCheckpointRecordUsesResolvedVersion(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	oldVersion := version
+	version = "v1.2.3"
+	t.Cleanup(func() { version = oldVersion })
+
+	record, _, err := newCheckpointRecord(
+		Repo{Name: "my-app"},
+		defaultConfig(),
+		Server{CloudID: "i-1234567890abcdef0", Provider: "aws"},
+		SSHTarget{TargetOS: targetLinux},
+		"cbx_123",
+		"/work/cbx_123/my-app",
+		"test checkpoint",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.CrabboxVersion != "1.2.3" {
+		t.Fatalf("CrabboxVersion=%q, want 1.2.3", record.CrabboxVersion)
 	}
 }
 
@@ -314,11 +460,11 @@ func TestCheckpointForkReleasesLeaseWhenKeepFalse(t *testing.T) {
 		Workdir:     remoteJoin(cfg, backend.leaseID, repo.Name),
 	}
 	record.Native.ImageID = "ami-12345678"
-	dir, err := checkpointDir(record.ID)
+	store, err := defaultCheckpointStore()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckpointRecord(dir, record); err != nil {
+	if _, err := store.Create(record); err != nil {
 		t.Fatal(err)
 	}
 
@@ -332,6 +478,145 @@ func TestCheckpointForkReleasesLeaseWhenKeepFalse(t *testing.T) {
 	}
 	if backend.releaseCount != 1 {
 		t.Fatalf("releaseCount=%d, want 1", backend.releaseCount)
+	}
+}
+
+func TestCheckpointForkRejectsPendingNativeCheckpoint(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("CRABBOX_COORDINATOR", "")
+	t.Setenv("CRABBOX_COORDINATOR_TOKEN", "")
+
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpointRecord{
+		ID:        "chk_pending_native",
+		Kind:      checkpointKindAWSEBS,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		TargetOS:  targetLinux,
+	}
+	if _, err := store.Create(record); err != nil {
+		t.Fatal(err)
+	}
+
+	app := App{Stdout: io.Discard, Stderr: io.Discard}
+	err = app.checkpointFork(context.Background(), []string{record.ID})
+	if err == nil {
+		t.Fatal("expected pending native checkpoint fork to fail")
+	}
+	if !strings.Contains(err.Error(), "pending") {
+		t.Fatalf("err=%v, want pending checkpoint error", err)
+	}
+}
+
+func TestCheckpointInspectVerifyResourceOnlyNativeDoesNotUseCoordinator(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("CRABBOX_COORDINATOR", "")
+	t.Setenv("CRABBOX_COORDINATOR_TOKEN", "")
+
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpointRecord{
+		ID:        "chk_resource_only",
+		Kind:      checkpointKindGCPDisk,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		TargetOS:  targetLinux,
+	}
+	record.Native.Resource = "projects/proj/global/snapshots/checkpoint"
+	if _, err := store.Create(record); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.checkpointInspect(context.Background(), []string{record.ID, "--verify", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	var audit checkpointAudit
+	if err := json.Unmarshal(stdout.Bytes(), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit.ProviderState != "unverified_ref" || audit.NextAction != "fork_or_delete_local" {
+		t.Fatalf("audit=%#v", audit)
+	}
+}
+
+func TestCheckpointDeleteResourceOnlyNativeDeletesProviderResource(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("CRABBOX_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+
+	var deleteRequest string
+	var deleteProvider string
+	var deleteKind string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deleteRequest = r.Method + " " + r.RequestURI
+		deleteProvider = r.URL.Query().Get("provider")
+		deleteKind = r.URL.Query().Get("kind")
+		_, _ = w.Write([]byte(`{"deleted":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("CRABBOX_COORDINATOR", server.URL)
+	t.Setenv("CRABBOX_COORDINATOR_ADMIN_TOKEN", "admin")
+
+	store, err := defaultCheckpointStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := checkpointRecord{
+		ID:        "chk_resource_delete",
+		Kind:      checkpointKindAzureOS,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		TargetOS:  targetLinux,
+	}
+	record.Native.Resource = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/snapshots/checkpoint"
+	if _, err := store.Create(record); err != nil {
+		t.Fatal(err)
+	}
+
+	app := App{Stdout: io.Discard, Stderr: io.Discard}
+	if err := app.checkpointDelete(context.Background(), []string{record.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if deleteProvider != "azure" {
+		t.Fatalf("provider query=%q", deleteProvider)
+	}
+	if deleteKind != "azure-os-disk-snapshot" {
+		t.Fatalf("kind query=%q", deleteKind)
+	}
+	if !strings.HasPrefix(deleteRequest, "DELETE /v1/images/%2Fsubscriptions%2Fsub%2FresourceGroups%2Frg%2Fproviders%2FMicrosoft.Compute%2Fsnapshots%2Fcheckpoint?") {
+		t.Fatalf("delete request=%q", deleteRequest)
+	}
+	if _, _, err := store.Read(record.ID); err == nil {
+		t.Fatal("delete kept checkpoint")
+	}
+}
+
+func TestNativeCheckpointResourceIDAllowsAzureGCPResourceOnlyRecords(t *testing.T) {
+	aws := checkpointRecord{Kind: checkpointKindAWSAMI}
+	aws.Native.Resource = "ami-resource-only"
+	if got := nativeCheckpointResourceID(aws); got != "" {
+		t.Fatalf("aws resource-only ref=%q, want empty", got)
+	}
+	aws.Native.ImageID = "ami-12345678"
+	if got := nativeCheckpointResourceID(aws); got != "ami-12345678" {
+		t.Fatalf("aws ref=%q", got)
+	}
+
+	azure := checkpointRecord{Kind: checkpointKindAzureOS}
+	azure.Native.Resource = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/snapshots/checkpoint"
+	if got := nativeCheckpointResourceID(azure); got != azure.Native.Resource {
+		t.Fatalf("azure ref=%q", got)
+	}
+
+	gcp := checkpointRecord{Kind: checkpointKindGCPDisk}
+	gcp.Native.Resource = "projects/proj/global/snapshots/checkpoint"
+	if got := nativeCheckpointResourceID(gcp); got != gcp.Native.Resource {
+		t.Fatalf("gcp ref=%q", got)
 	}
 }
 
@@ -537,15 +822,17 @@ func TestRemoteCheckpointArchiveCommand(t *testing.T) {
 }
 
 func TestRemoteCheckpointRestoreCommandClearsWorkdir(t *testing.T) {
-	cmd := remoteCheckpointRestoreCommand("/work/repo", "/tmp/chk.tar.gz", true)
+	cmd := remoteCheckpointRestoreCommand("/work/repo", true)
 	for _, want := range []string{
+		"mktemp /tmp/crabbox-checkpoint.XXXXXX",
+		"trap cleanup EXIT INT TERM",
+		"cat > \"$tmp\"",
 		"mkdir -p",
 		"/work/repo",
 		"find",
 		"-mindepth 1 -maxdepth 1 -exec rm -rf -- {} +",
 		"tar -C",
 		"-xzf",
-		"/tmp/chk.tar.gz",
 		"rm -f --",
 	} {
 		if !strings.Contains(cmd, want) {

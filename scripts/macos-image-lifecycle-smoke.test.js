@@ -220,6 +220,15 @@ test("macOS lifecycle smoke writes a blocked IAM summary before paid work", asyn
   await assertFileContains(summary.evidence.hostOfferings, /mac2\.metal/);
   await assertFileContains(summary.evidence.hostList, /^\[\]\n?$/);
   await assertFileContains(summary.evidence.hostDryRun, /UnauthorizedOperation/);
+  assert.equal(summary.evidence.hostAllocate, null);
+  assert.equal(summary.evidence.webvncDaemon.source, null);
+  assert.equal(summary.evidence.webvncStatus.source, null);
+
+  const evidenceFiles = await readdir(path.join(run.artifacts, "evidence"));
+  assert.deepEqual(
+    evidenceFiles.filter((name) => name.startsWith("webvnc-daemon-")),
+    [],
+  );
 });
 
 test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () => {

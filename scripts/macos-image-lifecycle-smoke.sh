@@ -153,9 +153,36 @@ cleanup() {
 write_summary() {
   local result="$1"
   local phase="$2"
+  local aws_policy_log_path mac_host_policy_log_path macos_image_policy_log_path offerings_log_path hosts_log_path
+  local dry_log_path allocate_log_path image_create_log_path image_promote_log_path
+  local source_host_wait_log_path candidate_host_wait_log_path promoted_host_wait_log_path
+  local source_warmup_log_path candidate_warmup_log_path promoted_warmup_log_path
+  local source_webvnc_status_log_path candidate_webvnc_status_log_path promoted_webvnc_status_log_path
+  local source_webvnc_daemon_log_path candidate_webvnc_daemon_log_path promoted_webvnc_daemon_log_path
   summary_result="$result"
   summary_phase="$phase"
   mkdir -p "$artifact_root"
+  aws_policy_log_path="$(existing_file_or_empty "$aws_policy_log")"
+  mac_host_policy_log_path="$(existing_file_or_empty "$mac_host_policy_log")"
+  macos_image_policy_log_path="$(existing_file_or_empty "$macos_image_policy_log")"
+  offerings_log_path="$(existing_file_or_empty "$offerings_log")"
+  hosts_log_path="$(existing_file_or_empty "$hosts_log")"
+  dry_log_path="$(existing_file_or_empty "$dry_log")"
+  allocate_log_path="$(existing_file_or_empty "$allocate_log")"
+  image_create_log_path="$(existing_file_or_empty "$image_create_log")"
+  image_promote_log_path="$(existing_file_or_empty "$image_promote_log")"
+  source_host_wait_log_path="$(existing_file_or_empty "$source_host_wait_log")"
+  candidate_host_wait_log_path="$(existing_file_or_empty "$candidate_host_wait_log")"
+  promoted_host_wait_log_path="$(existing_file_or_empty "$promoted_host_wait_log")"
+  source_warmup_log_path="$(existing_file_or_empty "$source_warmup_log")"
+  candidate_warmup_log_path="$(existing_file_or_empty "$candidate_warmup_log")"
+  promoted_warmup_log_path="$(existing_file_or_empty "$promoted_warmup_log")"
+  source_webvnc_status_log_path="$(existing_file_or_empty "$source_webvnc_status_log")"
+  candidate_webvnc_status_log_path="$(existing_file_or_empty "$candidate_webvnc_status_log")"
+  promoted_webvnc_status_log_path="$(existing_file_or_empty "$promoted_webvnc_status_log")"
+  source_webvnc_daemon_log_path="$(existing_file_or_empty "$source_webvnc_daemon_log")"
+  candidate_webvnc_daemon_log_path="$(existing_file_or_empty "$candidate_webvnc_daemon_log")"
+  promoted_webvnc_daemon_log_path="$(existing_file_or_empty "$promoted_webvnc_daemon_log")"
   jq -n \
     --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg result "$result" \
@@ -178,28 +205,29 @@ write_summary() {
     --arg blockerMessage "$blocker_message" \
     --arg blockerRemediation "$blocker_remediation" \
     --arg blockerCommands "$blocker_commands" \
-    --arg awsPolicyLog "$aws_policy_log" \
-    --arg macHostPolicyLog "$mac_host_policy_log" \
-    --arg macosImagePolicyLog "$macos_image_policy_log" \
-    --arg offeringsLog "$offerings_log" \
-    --arg hostsLog "$hosts_log" \
-    --arg dryLog "$dry_log" \
-    --arg allocateLog "$allocate_log" \
-    --arg imageCreateLog "$image_create_log" \
-    --arg imagePromoteLog "$image_promote_log" \
-    --arg sourceHostWaitLog "$source_host_wait_log" \
-    --arg candidateHostWaitLog "$candidate_host_wait_log" \
-    --arg promotedHostWaitLog "$promoted_host_wait_log" \
-    --arg sourceWarmupLog "$source_warmup_log" \
-    --arg candidateWarmupLog "$candidate_warmup_log" \
-    --arg promotedWarmupLog "$promoted_warmup_log" \
-    --arg sourceWebVNCStatusLog "$source_webvnc_status_log" \
-    --arg candidateWebVNCStatusLog "$candidate_webvnc_status_log" \
-    --arg promotedWebVNCStatusLog "$promoted_webvnc_status_log" \
-    --arg sourceWebVNCDaemonLog "$source_webvnc_daemon_log" \
-    --arg candidateWebVNCDaemonLog "$candidate_webvnc_daemon_log" \
-    --arg promotedWebVNCDaemonLog "$promoted_webvnc_daemon_log" \
-    '{
+    --arg awsPolicyLog "$aws_policy_log_path" \
+    --arg macHostPolicyLog "$mac_host_policy_log_path" \
+    --arg macosImagePolicyLog "$macos_image_policy_log_path" \
+    --arg offeringsLog "$offerings_log_path" \
+    --arg hostsLog "$hosts_log_path" \
+    --arg dryLog "$dry_log_path" \
+    --arg allocateLog "$allocate_log_path" \
+    --arg imageCreateLog "$image_create_log_path" \
+    --arg imagePromoteLog "$image_promote_log_path" \
+    --arg sourceHostWaitLog "$source_host_wait_log_path" \
+    --arg candidateHostWaitLog "$candidate_host_wait_log_path" \
+    --arg promotedHostWaitLog "$promoted_host_wait_log_path" \
+    --arg sourceWarmupLog "$source_warmup_log_path" \
+    --arg candidateWarmupLog "$candidate_warmup_log_path" \
+    --arg promotedWarmupLog "$promoted_warmup_log_path" \
+    --arg sourceWebVNCStatusLog "$source_webvnc_status_log_path" \
+    --arg candidateWebVNCStatusLog "$candidate_webvnc_status_log_path" \
+    --arg promotedWebVNCStatusLog "$promoted_webvnc_status_log_path" \
+    --arg sourceWebVNCDaemonLog "$source_webvnc_daemon_log_path" \
+    --arg candidateWebVNCDaemonLog "$candidate_webvnc_daemon_log_path" \
+    --arg promotedWebVNCDaemonLog "$promoted_webvnc_daemon_log_path" \
+    'def maybe_path($path): if $path == "" then null else $path end;
+    {
       generatedAt: $generatedAt,
       result: $result,
       phase: $phase,
@@ -235,38 +263,45 @@ write_summary() {
         promoted: ($artifactRoot + "/promoted")
       },
       evidence: {
-        awsProviderPolicy: $awsPolicyLog,
-        macHostPolicy: $macHostPolicyLog,
-        macosImagePolicy: $macosImagePolicyLog,
-        hostOfferings: $offeringsLog,
-        hostList: $hostsLog,
-        hostDryRun: $dryLog,
-        hostAllocate: $allocateLog,
-        imageCreate: $imageCreateLog,
-        imagePromote: $imagePromoteLog,
+        awsProviderPolicy: maybe_path($awsPolicyLog),
+        macHostPolicy: maybe_path($macHostPolicyLog),
+        macosImagePolicy: maybe_path($macosImagePolicyLog),
+        hostOfferings: maybe_path($offeringsLog),
+        hostList: maybe_path($hostsLog),
+        hostDryRun: maybe_path($dryLog),
+        hostAllocate: maybe_path($allocateLog),
+        imageCreate: maybe_path($imageCreateLog),
+        imagePromote: maybe_path($imagePromoteLog),
         hostWait: {
-          source: $sourceHostWaitLog,
-          candidate: $candidateHostWaitLog,
-          promoted: $promotedHostWaitLog
+          source: maybe_path($sourceHostWaitLog),
+          candidate: maybe_path($candidateHostWaitLog),
+          promoted: maybe_path($promotedHostWaitLog)
         },
         warmup: {
-          source: $sourceWarmupLog,
-          candidate: $candidateWarmupLog,
-          promoted: $promotedWarmupLog
+          source: maybe_path($sourceWarmupLog),
+          candidate: maybe_path($candidateWarmupLog),
+          promoted: maybe_path($promotedWarmupLog)
         },
         webvncStatus: {
-          source: $sourceWebVNCStatusLog,
-          candidate: $candidateWebVNCStatusLog,
-          promoted: $promotedWebVNCStatusLog
+          source: maybe_path($sourceWebVNCStatusLog),
+          candidate: maybe_path($candidateWebVNCStatusLog),
+          promoted: maybe_path($promotedWebVNCStatusLog)
         },
         webvncDaemon: {
-          source: $sourceWebVNCDaemonLog,
-          candidate: $candidateWebVNCDaemonLog,
-          promoted: $promotedWebVNCDaemonLog
+          source: maybe_path($sourceWebVNCDaemonLog),
+          candidate: maybe_path($candidateWebVNCDaemonLog),
+          promoted: maybe_path($promotedWebVNCDaemonLog)
         }
       }
     }' >"$summary_file"
   printf 'macOS lifecycle summary: %s\n' "$summary_file"
+}
+
+existing_file_or_empty() {
+  local path="${1:-}"
+  if [[ -n "$path" && -f "$path" ]]; then
+    printf '%s' "$path"
+  fi
 }
 
 on_exit() {

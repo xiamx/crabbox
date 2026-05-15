@@ -154,14 +154,47 @@ const awsProviderPolicyJSON = `{
 
 func (a App) adminAWSPolicy(args []string) error {
 	fs := newFlagSet("admin aws-policy", a.Stderr)
+	includeMacHosts := fs.Bool("mac-hosts", false, "include EC2 Mac Dedicated Host lifecycle permissions")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return exit(2, "usage: crabbox admin aws-policy")
+		return exit(2, "usage: crabbox admin aws-policy [--mac-hosts]")
 	}
-	fmt.Fprintln(a.Stdout, awsProviderPolicyJSON)
+	policy := awsProviderPolicyJSON
+	if *includeMacHosts {
+		combined, err := combineIAMPolicyJSON(awsProviderPolicyJSON, macHostLifecyclePolicyJSON)
+		if err != nil {
+			return err
+		}
+		policy = combined
+	}
+	fmt.Fprintln(a.Stdout, policy)
 	return nil
+}
+
+type iamPolicyDocument struct {
+	Version   string            `json:"Version"`
+	Statement []json.RawMessage `json:"Statement"`
+}
+
+func combineIAMPolicyJSON(policies ...string) (string, error) {
+	combined := iamPolicyDocument{Version: "2012-10-17"}
+	for _, policy := range policies {
+		var doc iamPolicyDocument
+		if err := json.Unmarshal([]byte(policy), &doc); err != nil {
+			return "", err
+		}
+		if doc.Version != "" {
+			combined.Version = doc.Version
+		}
+		combined.Statement = append(combined.Statement, doc.Statement...)
+	}
+	out, err := json.MarshalIndent(combined, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func (a App) adminMacHosts(ctx context.Context, args []string) error {

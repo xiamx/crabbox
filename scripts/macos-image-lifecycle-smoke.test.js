@@ -23,7 +23,11 @@ mkdir -p "$state_dir"
 printf '%s\\n' "$*" >>"$log"
 
 if [[ "$1" == "admin" && "$2" == "aws-policy" ]]; then
-  printf '{"Statement":[{"Action":"ec2:RunInstances"}]}\\n'
+  if [[ " $* " == *" --mac-hosts "* ]]; then
+    printf '{"Statement":[{"Action":["ec2:RunInstances","ec2:AllocateHosts"]}]}\\n'
+  else
+    printf '{"Statement":[{"Action":"ec2:RunInstances"}]}\\n'
+  fi
   exit 0
 fi
 
@@ -207,12 +211,12 @@ test("macOS lifecycle smoke writes a blocked IAM summary before paid work", asyn
   assert.match(summary.blocker.remediation, /Apply the EC2 Mac host lifecycle policy/);
   assert.deepEqual(summary.blocker.commands, [
     `${run.fake} admin aws-identity --region eu-west-1`,
-    `${run.fake} admin mac-hosts policy`,
-    `${run.fake} admin aws-policy`,
+    `${run.fake} admin aws-policy --mac-hosts`,
     `${run.fake} admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run --json`,
   ]);
   await assertFileContains(summary.evidence.awsProviderPolicy, /ec2:RunInstances/);
   await assertFileContains(summary.evidence.macHostPolicy, /ec2:AllocateHosts/);
+  await assertFileContains(summary.evidence.macosImagePolicy, /ec2:AllocateHosts/);
   await assertFileContains(summary.evidence.hostOfferings, /mac2\.metal/);
   await assertFileContains(summary.evidence.hostList, /^\[\]\n?$/);
   await assertFileContains(summary.evidence.hostDryRun, /UnauthorizedOperation/);
@@ -251,6 +255,7 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   await assertFileContains(summary.evidence.imagePromote, /"target":"macos"/);
   await assertFileContains(summary.evidence.awsProviderPolicy, /ec2:RunInstances/);
   await assertFileContains(summary.evidence.macHostPolicy, /ec2:AllocateHosts/);
+  await assertFileContains(summary.evidence.macosImagePolicy, /ec2:AllocateHosts/);
 
   const evidenceFiles = await readdir(path.join(run.artifacts, "evidence"));
   assert.deepEqual(

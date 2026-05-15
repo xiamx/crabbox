@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -73,6 +74,32 @@ func TestAdminAWSPolicyPrintsProviderPermissions(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("policy missing %s:\n%s", want, out)
 		}
+	}
+}
+
+func TestAdminAWSPolicyCanIncludeMacHostPermissions(t *testing.T) {
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.adminAWSPolicy([]string{"--mac-hosts"}); err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		`"ec2:RunInstances"`,
+		`"ec2:AllocateHosts"`,
+		`"ec2:ReleaseHosts"`,
+		`"ec2:CreateAction": "AllocateHosts"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("combined policy missing %s:\n%s", want, out)
+		}
+	}
+	var doc iamPolicyDocument
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("combined policy is invalid JSON: %v\n%s", err, out)
+	}
+	if len(doc.Statement) < 6 {
+		t.Fatalf("combined policy statements=%d, want provider plus mac-host statements", len(doc.Statement))
 	}
 }
 

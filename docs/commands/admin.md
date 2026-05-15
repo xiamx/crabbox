@@ -8,7 +8,7 @@ crabbox admin leases --state active --json
 crabbox admin lease-audit --state expired --provider aws
 crabbox admin lease-audit --fail-on-live
 crabbox admin aws-identity --region eu-west-1
-crabbox admin aws-policy
+crabbox admin aws-policy [--mac-hosts]
 crabbox admin mac-hosts policy
 crabbox admin mac-hosts offerings --region eu-west-1 --type mac2.metal
 crabbox admin mac-hosts list --region eu-west-1
@@ -80,12 +80,13 @@ groups, image creation/promotion, snapshot cleanup, and optional Service Quotas
 reads. If `CRABBOX_AWS_INSTANCE_PROFILE` is set, add a separate scoped
 `iam:PassRole` grant for that role with `iam:PassedToService=ec2.amazonaws.com`.
 EC2 Mac Dedicated Host allocation and release are intentionally separate; use
-`crabbox admin mac-hosts policy` for that grant.
+`crabbox admin mac-hosts policy` for that grant, or add `--mac-hosts` to print
+one combined provider plus Dedicated Host lifecycle policy.
 
 Flags:
 
 ```text
-no flags
+--mac-hosts    include EC2 Mac Dedicated Host lifecycle permissions
 ```
 
 ## mac-hosts

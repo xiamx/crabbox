@@ -198,7 +198,7 @@ copy-pasteable policy with:
 
 ```bash
 crabbox admin aws-identity --region eu-west-1
-crabbox admin aws-policy
+crabbox admin aws-policy --mac-hosts
 crabbox admin mac-hosts policy
 ```
 
@@ -207,7 +207,8 @@ Dedicated Host allocation and release. The full paid lifecycle also needs the
 normal AWS provider permissions in [Infrastructure](../infrastructure.md#aws-ec2)
 for key pairs, security groups, macOS `RunInstances`, AMI creation, candidate
 boot, promotion, snapshot cleanup, and lease termination. Print the baseline
-provider policy with `crabbox admin aws-policy`.
+provider policy with `crabbox admin aws-policy`, or the combined provider plus
+Dedicated Host policy with `crabbox admin aws-policy --mac-hosts`.
 
 For an end-to-end guarded run, use the repository smoke script:
 
@@ -244,9 +245,10 @@ pre-existing host unless `CRABBOX_MACOS_RELEASE_EXISTING_HOST=1` is also set.
 Every run writes `.crabbox/macos-image-smoke/<image-name>/summary.json` with
 the current phase, host id, lease ids, AMI id when available, blocker
 remediation commands when blocked, and artifact paths. It also preserves the
-baseline AWS provider policy, EC2 Mac host policy, host offering/list/dry-run,
-allocation, image create, image promotion, host wait, warmup, and WebVNC status
-evidence under the run's `evidence/` directory. Override the directory with
+baseline AWS provider policy, EC2 Mac host policy, combined macOS image policy,
+host offering/list/dry-run, allocation, image create, image promotion, host
+wait, warmup, and WebVNC status evidence under the run's `evidence/` directory.
+Override the directory with
 `CRABBOX_MACOS_ARTIFACT_DIR`.
 
 If an available EC2 Mac Dedicated Host already exists, the script still stops

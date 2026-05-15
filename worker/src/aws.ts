@@ -1042,6 +1042,12 @@ function positiveNumber(value: unknown): number | undefined {
 }
 
 export function awsProvisioningErrorCategory(message: string): string {
+  if (message.includes("no available EC2 Mac Dedicated Host")) {
+    return "capacity";
+  }
+  if (message.includes("no AWS AMI found")) {
+    return "region";
+  }
   if (message.includes("InsufficientInstanceCapacity")) {
     return "capacity";
   }

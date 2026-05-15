@@ -15,6 +15,7 @@
 - Fixed coordinator-backed macOS lease reuse so follow-up `run`, sync, and image smoke commands use the brokered `/Users/ec2-user/crabbox` work root instead of Linux's `/work/crabbox`.
 - Fixed remote macOS screenshots so `crabbox screenshot` captures the Screen Sharing/VNC framebuffer instead of relying on `screencapture` from non-interactive SSH sessions.
 - Fixed brokered AWS macOS launches so a stale configured Dedicated Host id can fall back to discovering another available EC2 Mac Dedicated Host in the selected region.
+- Fixed brokered AWS macOS region fallback so missing Mac hosts or regional macOS AMIs do not stop the configured region search early.
 - Fixed AWS image deletion so scoped promoted macOS images cannot be deleted until another image is promoted.
 - Fixed `crabbox admin lease-audit --fail-on-live` so recently terminated AWS instances returned by `DescribeInstances` do not fail cleanup automation as live resources.
 - Fixed coordinator TTL cleanup so provider deletion failures keep leases active with retry metadata instead of silently expiring while cloud instances continue running.

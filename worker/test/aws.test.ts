@@ -17,6 +17,7 @@ import {
   isAWSInstanceCleanedAfterReadinessFailure,
   isAWSInvalidHostIDError,
   isAWSInstanceNotFoundError,
+  isRetryableAWSProvisioningError,
   staleCrabboxSSHIngressRules,
 } from "../src/aws";
 
@@ -255,6 +256,18 @@ describe("aws provider", () => {
         "eu-west-1",
       ),
     ).toBe("eu-west-1b");
+  });
+
+  it("treats macOS host and image misses as retryable regional AWS failures", () => {
+    const hostMiss =
+      "no available EC2 Mac Dedicated Host found in eu-west-1 for mac2.metal; allocate a host or set CRABBOX_AWS_MAC_HOST_ID";
+    const imageMiss =
+      "no AWS AMI found in eu-west-2 for name=amzn-ec2-macos-14.*-arm64 architecture=arm64_mac";
+
+    expect(awsProvisioningErrorCategory(hostMiss)).toBe("capacity");
+    expect(isRetryableAWSProvisioningError(hostMiss)).toBe(true);
+    expect(awsProvisioningErrorCategory(imageMiss)).toBe("region");
+    expect(isRetryableAWSProvisioningError(imageMiss)).toBe(true);
   });
 
   it("maps AWS instance types to vCPU quota units", () => {

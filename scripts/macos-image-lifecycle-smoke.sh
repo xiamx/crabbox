@@ -14,6 +14,7 @@ host_wait_timeout="${CRABBOX_MACOS_HOST_WAIT_TIMEOUT:-5h}"
 host_wait_interval="${CRABBOX_MACOS_HOST_WAIT_INTERVAL:-2m}"
 webvnc_wait_timeout="${CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT:-2m}"
 webvnc_wait_interval="${CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL:-5s}"
+webvnc_start_grace="${CRABBOX_MACOS_WEBVNC_START_GRACE:-3s}"
 allocate="${CRABBOX_MACOS_ALLOCATE:-0}"
 run_existing="${CRABBOX_MACOS_RUN:-0}"
 create_image="${CRABBOX_MACOS_CREATE_IMAGE:-1}"
@@ -364,6 +365,7 @@ smoke_macos_lease() {
   local lease="$1"
   local label="$2"
   local out_dir="$artifact_root/$label"
+  local webvnc_grace_seconds
   # shellcheck disable=SC2016
   run "$CRABBOX_BIN" run \
     --provider aws \
@@ -389,7 +391,10 @@ smoke_macos_lease() {
   else
     run "$CRABBOX_BIN" webvnc daemon start --provider aws --target macos --id "$lease"
   fi
-  sleep 3
+  webvnc_grace_seconds="$(duration_seconds "$webvnc_start_grace")"
+  if [[ "$webvnc_grace_seconds" -gt 0 ]]; then
+    sleep "$webvnc_grace_seconds"
+  fi
   require_webvnc_connected "$lease" "$label"
   run "$CRABBOX_BIN" artifacts collect \
     --provider aws \

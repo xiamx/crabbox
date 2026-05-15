@@ -219,7 +219,8 @@ desktop artifacts, creates a candidate AMI with a rebooting image capture,
 boots and smokes the candidate, then promotes and smokes the promoted image
 when `CRABBOX_MACOS_PROMOTE=1`. Tune the WebVNC bridge wait with
 `CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT` and
-`CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL`. EC2 Mac Dedicated Hosts have
+`CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL`; tune the post-start grace period with
+`CRABBOX_MACOS_WEBVNC_START_GRACE`. EC2 Mac Dedicated Hosts have
 provider-side billing and release constraints; the script stops each lease's
 local WebVNC daemon before lease cleanup, waits for the host to return to
 `available` between macOS boots, and releases the host only when

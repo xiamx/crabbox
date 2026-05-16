@@ -3545,6 +3545,15 @@ export class FleetDurableObject implements DurableObject {
           { status: 409 },
         );
       }
+      if (target === "macos" && !image.serverType) {
+        return json(
+          {
+            error: "invalid_server_type",
+            message: "macOS AWS image promotion requires serverType",
+          },
+          { status: 400 },
+        );
+      }
       const promoted: PromotedImageRecord = {
         ...image,
         target,
@@ -3575,10 +3584,23 @@ export class FleetDurableObject implements DurableObject {
       promotedAWSImageKey({
         target: config.target,
         architecture: awsImageArchitectureForTarget(config.target, config.serverType),
+        serverType: config.serverType,
         region: config.awsRegion,
       }),
     );
-    if (scoped || config.target !== "linux") {
+    if (scoped) {
+      return scoped;
+    }
+    if (config.target === "macos") {
+      return this.state.storage.get<PromotedImageRecord>(
+        legacyScopedPromotedAWSImageKey({
+          target: config.target,
+          architecture: awsImageArchitectureForTarget(config.target, config.serverType),
+          region: config.awsRegion,
+        }),
+      );
+    }
+    if (config.target !== "linux") {
       return scoped;
     }
     return this.state.storage.get<PromotedImageRecord>(legacyPromotedAWSImageKey());
@@ -4175,12 +4197,31 @@ function promotedAWSImagePrefix(): string {
 }
 
 function promotedAWSImageKey(
+  image: Pick<ProviderImage, "target" | "architecture" | "region" | "serverType">,
+): string {
+  const target = image.target ?? "linux";
+  const architecture = image.architecture ?? awsImageArchitectureForTarget(target, "");
+  const region = sanitizeAWSRegion(image.region ?? "");
+  if (target === "macos") {
+    return `image:aws:promoted:${target}:${architecture}:${sanitizePromotedAWSImageKeyPart(image.serverType ?? "")}:${region}`;
+  }
+  return `image:aws:promoted:${target}:${architecture}:${region}`;
+}
+
+function legacyScopedPromotedAWSImageKey(
   image: Pick<ProviderImage, "target" | "architecture" | "region">,
 ): string {
   const target = image.target ?? "linux";
   const architecture = image.architecture ?? awsImageArchitectureForTarget(target, "");
   const region = sanitizeAWSRegion(image.region ?? "");
   return `image:aws:promoted:${target}:${architecture}:${region}`;
+}
+
+function sanitizePromotedAWSImageKeyPart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9._-]/g, "");
 }
 
 function enrichAWSImage(image: ProviderImage, lease: LeaseRecord): ProviderImage {

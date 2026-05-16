@@ -936,12 +936,13 @@ describe("fleet lease identity and idle", () => {
 
   it("only applies target-matching promoted AWS images", async () => {
     const storage = new MemoryStorage();
-    storage.seed("image:aws:promoted:macos:arm64_mac:eu-west-1", {
+    storage.seed("image:aws:promoted:macos:arm64_mac:mac2.metal:eu-west-1", {
       id: "ami-macos",
       name: "crabbox-macos",
       state: "available",
       region: "eu-west-1",
       target: "macos",
+      serverType: "mac2.metal",
       architecture: "arm64_mac",
       promotedAt: "2026-05-01T12:46:00Z",
     });
@@ -987,6 +988,73 @@ describe("fleet lease identity and idle", () => {
     );
     expect(macos.status).toBe(201);
     expect(seenAMI).toEqual(["", "ami-macos"]);
+  });
+
+  it("uses server-type scoped promoted AWS macOS images when creating leases", async () => {
+    const storage = new MemoryStorage();
+    storage.seed("image:aws:promoted:macos:arm64_mac:mac2.metal:eu-west-1", {
+      id: "ami-mac2",
+      name: "crabbox-mac2",
+      state: "available",
+      region: "eu-west-1",
+      target: "macos",
+      serverType: "mac2.metal",
+      architecture: "arm64_mac",
+      promotedAt: "2026-05-01T12:46:00Z",
+    });
+    storage.seed("image:aws:promoted:macos:arm64_mac:mac-m4.metal:eu-west-1", {
+      id: "ami-m4",
+      name: "crabbox-m4",
+      state: "available",
+      region: "eu-west-1",
+      target: "macos",
+      serverType: "mac-m4.metal",
+      architecture: "arm64_mac",
+      promotedAt: "2026-05-01T12:47:00Z",
+    });
+    const seenAMI: string[] = [];
+    const fleet = testFleet(storage, {
+      aws: fakeProvider((config) => {
+        seenAMI.push(config.awsAMI);
+      }),
+    });
+
+    const mac2 = await fleet.fetch(
+      request("POST", "/v1/leases", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "cf-connecting-ip": "203.0.113.7",
+          "x-crabbox-org": "example-org",
+        },
+        body: {
+          provider: "aws",
+          target: "macos",
+          capacity: { market: "on-demand" },
+          serverType: "mac2.metal",
+          sshPublicKey: "ssh-ed25519 test",
+        },
+      }),
+    );
+    const m4 = await fleet.fetch(
+      request("POST", "/v1/leases", {
+        headers: {
+          "x-crabbox-owner": "alice@example.com",
+          "cf-connecting-ip": "203.0.113.7",
+          "x-crabbox-org": "example-org",
+        },
+        body: {
+          provider: "aws",
+          target: "macos",
+          capacity: { market: "on-demand" },
+          serverType: "mac-m4.metal",
+          sshPublicKey: "ssh-ed25519 test",
+        },
+      }),
+    );
+
+    expect(mac2.status).toBe(201);
+    expect(m4.status).toBe(201);
+    expect(seenAMI).toEqual(["ami-mac2", "ami-m4"]);
   });
 
   it("honors requested AWS SSH ingress CIDRs over request source IP", async () => {
@@ -3495,7 +3563,7 @@ describe("fleet lease identity and idle", () => {
     );
   });
 
-  it("scopes promoted AWS macOS images by target and architecture", async () => {
+  it("scopes promoted AWS macOS images by target, architecture, and server type", async () => {
     const storage = new MemoryStorage();
     const fleet = testFleet(storage, {
       aws: fakeProvider(),
@@ -3535,7 +3603,7 @@ describe("fleet lease identity and idle", () => {
       }),
     );
     expect(promoted.status).toBe(200);
-    expect(storage.value("image:aws:promoted:macos:arm64_mac:eu-west-1")).toEqual(
+    expect(storage.value("image:aws:promoted:macos:arm64_mac:mac2.metal:eu-west-1")).toEqual(
       expect.objectContaining({ id: "ami-000000000001", target: "macos" }),
     );
     expect(storage.value("image:aws:promoted")).toBeUndefined();
@@ -3555,6 +3623,7 @@ describe("fleet lease identity and idle", () => {
             region: "us-east-1",
             resourceID: imageID,
             architecture: "x86_64_mac",
+            serverType: "mac1.metal",
           };
         },
       }),
@@ -3563,15 +3632,22 @@ describe("fleet lease identity and idle", () => {
     const promoted = await fleet.fetch(
       request("POST", "/v1/images/ami-external/promote?target=macos&region=us-east-1", {
         headers: { "x-crabbox-admin": "true" },
-        body: {},
+        body: { serverType: "mac1.metal" },
       }),
     );
 
     expect(promoted.status).toBe(200);
-    expect(storage.value("image:aws:promoted:macos:x86_64_mac:us-east-1")).toEqual(
-      expect.objectContaining({ id: "ami-external", architecture: "x86_64_mac", target: "macos" }),
+    expect(storage.value("image:aws:promoted:macos:x86_64_mac:mac1.metal:us-east-1")).toEqual(
+      expect.objectContaining({
+        id: "ami-external",
+        architecture: "x86_64_mac",
+        serverType: "mac1.metal",
+        target: "macos",
+      }),
     );
-    expect(storage.value("image:aws:promoted:macos:arm64_mac:us-east-1")).toBeUndefined();
+    expect(
+      storage.value("image:aws:promoted:macos:arm64_mac:mac1.metal:us-east-1"),
+    ).toBeUndefined();
   });
 
   it("uses promoted AWS image region when creating leases", async () => {
@@ -4025,12 +4101,13 @@ describe("fleet lease identity and idle", () => {
   it("rejects deleting scoped promoted AWS images", async () => {
     let deleted = "";
     const storage = new MemoryStorage();
-    storage.seed("image:aws:promoted:macos:arm64_mac:eu-west-1", {
+    storage.seed("image:aws:promoted:macos:arm64_mac:mac2.metal:eu-west-1", {
       id: "ami-000000000001",
       name: "crabbox-macos-test",
       state: "available",
       region: "eu-west-1",
       target: "macos",
+      serverType: "mac2.metal",
       architecture: "arm64_mac",
       promotedAt: "2026-05-01T12:46:00Z",
     });

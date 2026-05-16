@@ -250,6 +250,66 @@ bin/crabbox cleanup --dry-run
 bin/crabbox cleanup
 ```
 
+## AWS Security Guardrails
+
+Use the cheap account guardrails before adding heavier audit services:
+
+```sh
+account_id="$(aws sts get-caller-identity --query Account --output text)"
+
+aws s3control put-public-access-block \
+  --account-id "$account_id" \
+  --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+aws iam update-account-password-policy \
+  --minimum-password-length 14 \
+  --require-symbols \
+  --require-numbers \
+  --require-uppercase-characters \
+  --require-lowercase-characters \
+  --allow-users-to-change-password \
+  --max-password-age 90 \
+  --password-reuse-prevention 24
+```
+
+S3 account-level Block Public Access and the IAM account password policy are
+account-wide controls. IAM Access Analyzer external-access analyzers are
+regional, so create one in each AWS capacity region:
+
+```sh
+for region in eu-west-1 eu-west-2 eu-central-1 us-east-1 us-west-2; do
+  if ! aws accessanalyzer get-analyzer \
+    --region "$region" \
+    --analyzer-name crabbox-external-access >/dev/null 2>&1; then
+    aws accessanalyzer create-analyzer \
+      --region "$region" \
+      --analyzer-name crabbox-external-access \
+      --type ACCOUNT
+  fi
+done
+```
+
+List active external-access findings across the same pool:
+
+```sh
+for region in eu-west-1 eu-west-2 eu-central-1 us-east-1 us-west-2; do
+  arn="$(aws accessanalyzer get-analyzer \
+    --region "$region" \
+    --analyzer-name crabbox-external-access \
+    --query 'analyzer.arn' \
+    --output text)"
+  aws accessanalyzer list-findings \
+    --region "$region" \
+    --analyzer-arn "$arn" \
+    --filter '{"status":{"eq":["ACTIVE"]}}'
+done
+```
+
+Do not treat these as spend caps or compliance audit trails. CloudTrail, AWS
+Config, Security Hub, and GuardDuty are separate choices with different cost and
+retention tradeoffs.
+
 ## Cost Guardrails
 
 The coordinator reserves worst-case lease cost before provisioning. If a request would exceed active-lease or monthly cost limits, it fails before creating a VM.

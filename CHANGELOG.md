@@ -22,6 +22,10 @@
 
 - Fixed provider-neutral admin command errors so older coordinators report the neutral route and the legacy compatibility route that both returned 404.
 
+### Changed
+
+- Clarified AWS security guardrail docs so IAM Access Analyzer external-access analyzers are created in every configured capacity region, while S3 Block Public Access and IAM password policy remain account-level controls.
+
 ## 0.14.0 - 2026-05-15
 
 ### Added

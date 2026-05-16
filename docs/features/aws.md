@@ -178,6 +178,31 @@ only SSH ports to configured CIDRs or the detected request source. VNC stays
 behind the SSH tunnel. Supplying `CRABBOX_AWS_SECURITY_GROUP_ID` makes ingress
 policy your responsibility.
 
+Account-level AWS guardrails should match the regions Crabbox can allocate in:
+
+- S3 account-level Block Public Access is an account-wide control. Enable all
+  four settings once per AWS account; AWS propagates the setting across regions.
+- The IAM account password policy is global IAM account state. Set it once per
+  AWS account when IAM users are present.
+- IAM Access Analyzer external-access analyzers are regional. Create one in
+  every region where Crabbox can launch or use supported AWS resources, not only
+  the primary `CRABBOX_AWS_REGION`.
+
+For the public coordinator's default capacity pool, that means:
+
+```sh
+for region in eu-west-1 eu-west-2 eu-central-1 us-east-1 us-west-2; do
+  if ! aws accessanalyzer get-analyzer \
+    --region "$region" \
+    --analyzer-name crabbox-external-access >/dev/null 2>&1; then
+    aws accessanalyzer create-analyzer \
+      --region "$region" \
+      --analyzer-name crabbox-external-access \
+      --type ACCOUNT
+  fi
+done
+```
+
 ## Images
 
 Linux resolves the latest Ubuntu 24.04 x86_64 AMI unless overridden. Windows

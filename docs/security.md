@@ -155,6 +155,24 @@ Direct-CLI cleanup uses provider labels. It skips kept machines, deletes expired
 
 Release must be idempotent. Delete must tolerate already-deleted provider resources.
 
+## AWS Account Guardrails
+
+Crabbox AWS accounts should use low-cost default-deny guardrails before relying
+on lease cleanup alone:
+
+- Enable account-level S3 Block Public Access with all four settings. This is an
+  account-level S3 control that applies across regions after propagation.
+- Set an IAM account password policy when IAM users exist. Prefer SSO for human
+  access, but do not leave IAM user passwords on the AWS default policy.
+- Create IAM Access Analyzer external-access analyzers in every AWS region where
+  Crabbox can allocate resources. External analyzers are regional; a single
+  analyzer in the primary launch region does not cover the full capacity pool.
+
+For the default brokered AWS capacity pool, run Access Analyzer in
+`eu-west-1`, `eu-west-2`, `eu-central-1`, `us-east-1`, and `us-west-2`.
+Review active findings before deleting trusts: SSO roles and deliberately scoped
+artifact-publishing roles can appear as expected cross-account access.
+
 ## Data Retention
 
 Store only operational metadata:

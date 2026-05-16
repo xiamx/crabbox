@@ -11,6 +11,7 @@ static SSH provider for existing machines.
 
 | Provider | Backend kind | Targets | Best for |
 | --- | --- | --- | --- |
+| [OVH Cloud](ovh.md) | SSH lease | Linux | OVHcloud Public Cloud capacity at competitive rates |
 | [AWS](aws.md) | SSH lease | Linux, Windows, macOS | broad managed capacity, Windows, EC2 Mac |
 | [Azure](azure.md) | SSH lease | Linux, Windows | Azure-backed Linux and Windows capacity |
 | [Google Cloud](gcp.md) | SSH lease | Linux | GCP-backed Linux Compute Engine capacity |
@@ -83,6 +84,7 @@ through the Sprites API and reaches SSH through `sprite proxy`.
 | Azure | yes | yes | yes | Linux/Windows VNC; Linux code | yes | no |
 | Google Cloud | yes | yes | yes | no | yes | no |
 | Hetzner | yes | yes | yes | Linux VNC/code | yes | no |
+| OVH Cloud | yes | yes | yes | no | yes | no |
 | Proxmox | yes | yes | yes | no | yes | no |
 | Static SSH | yes | resolves host | yes | host-dependent | yes | no |
 | Blacksmith Testbox | yes | yes | no | no | no | yes |

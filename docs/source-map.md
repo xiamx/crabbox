@@ -34,6 +34,7 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
 ## Providers And Runner Bootstrap
 
 - Direct Hetzner provider: `internal/providers/hetzner`, with API client helpers in `internal/cli/hcloud.go`
+- Direct OVH Cloud provider: `internal/providers/ovh`, with API client helpers in `internal/cli/ovh.go`
 - Direct AWS provider: `internal/providers/aws`, with API client helpers in `internal/cli/aws.go`
 - Direct Azure provider: `internal/providers/azure`, with API client helpers in `internal/cli/azure.go`
 - Direct Google Cloud provider: `internal/providers/gcp`, with API client helpers in `internal/cli/gcp.go`
@@ -58,7 +59,7 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
   `internal/providers/namespace`, `internal/providers/daytona`, `internal/providers/islo`,
   `internal/providers/semaphore`, `internal/providers/sprites`, `internal/providers/e2b`,
   `internal/providers/modal`, `internal/providers/tensorlake`,
-  `internal/providers/cloudflare`, `internal/providers/all`
+  `internal/providers/ovh`, `internal/providers/cloudflare`, `internal/providers/all`
 - Built-in provider backend implementations:
   `internal/providers/aws`, `internal/providers/azure`, `internal/providers/gcp`,
   `internal/providers/hetzner`, `internal/providers/proxmox`,
@@ -66,12 +67,12 @@ This page maps user-facing behavior back to implementation files. Keep docs desc
   `internal/providers/namespace`, `internal/providers/daytona`, `internal/providers/islo`,
   `internal/providers/semaphore`, `internal/providers/sprites`, `internal/providers/e2b`,
   `internal/providers/modal`, `internal/providers/tensorlake`,
-  `internal/providers/cloudflare`, plus shared helpers in `internal/providers/shared`
+  `internal/providers/ovh`, `internal/providers/cloudflare`, plus shared helpers in `internal/providers/shared`
 - Worker Hetzner provider: `worker/src/hetzner.ts`
 - Worker AWS EC2 provider: `worker/src/aws.ts`
 - Worker provider image create/read/delete/promote routes: `worker/src/fleet.ts`, `worker/src/aws.ts`, `worker/src/azure.ts`, `worker/src/gcp.ts`
 - Provider feature docs: `docs/features/aws.md`, `docs/features/azure.md`, `docs/features/hetzner.md`, `docs/features/blacksmith-testbox.md`, `docs/features/namespace-devbox.md`, `docs/features/namespace-devbox-setup.md`, `docs/features/semaphore.md`, `docs/features/sprites.md`, `docs/features/daytona.md`, `docs/features/islo.md`, `docs/features/e2b.md`
-- Provider reference docs: `docs/providers/README.md`, `docs/providers/aws.md`, `docs/providers/azure.md`, `docs/providers/gcp.md`, `docs/providers/hetzner.md`, `docs/providers/proxmox.md`, `docs/providers/ssh.md`, `docs/providers/blacksmith-testbox.md`, `docs/providers/namespace-devbox.md`, `docs/providers/daytona.md`, `docs/providers/islo.md`, `docs/providers/semaphore.md`, `docs/providers/sprites.md`, `docs/providers/e2b.md`, `docs/providers/modal.md`, `docs/providers/tensorlake.md`, `docs/providers/cloudflare.md`
+- Provider reference docs: `docs/providers/README.md`, `docs/providers/aws.md`, `docs/providers/azure.md`, `docs/providers/gcp.md`, `docs/providers/hetzner.md`, `docs/providers/ovh.md`, `docs/providers/proxmox.md`, `docs/providers/ssh.md`, `docs/providers/blacksmith-testbox.md`, `docs/providers/namespace-devbox.md`, `docs/providers/daytona.md`, `docs/providers/islo.md`, `docs/providers/semaphore.md`, `docs/providers/sprites.md`, `docs/providers/e2b.md`, `docs/providers/modal.md`, `docs/providers/tensorlake.md`, `docs/providers/cloudflare.md`
 - Provider/backend authoring guide: `docs/provider-backends.md`
 - CLI cloud-init bootstrap: `internal/cli/bootstrap.go`
 - Worker cloud-init bootstrap: `worker/src/bootstrap.ts`

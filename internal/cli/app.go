@@ -98,6 +98,8 @@ func (a App) directCommandHelp(ctx context.Context, args []string) (error, bool)
 		return a.screenshot(ctx, helpArgs), true
 	case "artifacts":
 		return nil, false
+	case "capsule":
+		return nil, false
 	case "checkpoint":
 		return nil, false
 	case "inspect":
@@ -163,6 +165,7 @@ Commands:
   usage       Show cost and usage estimates by user, org, or fleet
   admin       Lease admin controls for trusted operators
   actions     Register GitHub Actions runners or dispatch workflows
+  capsule     Capture and replay lightweight failure capsules
   checkpoint  Create, restore, and fork workspace checkpoints
   ssh         Print the SSH command for a lease
   vnc         Print or open VNC connection details for a desktop lease
@@ -208,6 +211,8 @@ Common Flows:
   crabbox warmup --actions-runner
   crabbox actions hydrate --id blue-lobster
   crabbox actions dispatch -f testbox_id=cbx_abcdef123456
+  crabbox capsule from-actions https://github.com/example-org/my-app/actions/runs/123 --replay 'go test ./...'
+  crabbox capsule replay capsules/example-org-my-app-actions-123/capsule.yaml --keep
   crabbox checkpoint create --id blue-lobster --name after-install --mode native
   crabbox checkpoint fork chk_abcdef1234567890 --class beast
   crabbox run --provider ssh --target macos --static-host mac.local -- echo ok

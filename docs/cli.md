@@ -72,6 +72,10 @@ crabbox cache warm --id <lease-id-or-slug> -- <command...>
 crabbox actions hydrate --id <lease-id-or-slug> [--provider <provider>] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--workflow <file|name|id>] [--job <name>] [--wait-timeout <duration>] [--timing-json]
 crabbox actions register --id <lease-id-or-slug> [--provider <provider>] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--repo owner/name]
 crabbox actions dispatch [--workflow <file|name|id>] [-f key=value]
+crabbox capsule from-actions <run-url> --replay '<command>' [--output <dir>]
+crabbox capsule replay <capsule.yaml> [--keep]
+crabbox capsule inspect <capsule.yaml> [--json]
+crabbox capsule promote <capsule.yaml> --regression
 crabbox checkpoint create --id <lease-id-or-slug> [--name <name>] [--mode auto|native|archive] [--workdir <path>]
 crabbox checkpoint list [--json]
 crabbox checkpoint inspect <checkpoint-id> [--json]
@@ -154,6 +158,15 @@ crabbox warmup
 crabbox actions hydrate --id blue-lobster
 crabbox run --id blue-lobster -- pnpm test:changed
 crabbox stop blue-lobster
+```
+
+Capture and replay a failed GitHub Actions run:
+
+```sh
+crabbox capsule from-actions https://github.com/example-org/my-app/actions/runs/123 --replay 'go test ./...'
+crabbox capsule replay capsules/example-org-my-app-actions-123/capsule.yaml --keep
+crabbox ssh --id blue-lobster
+crabbox capsule promote capsules/example-org-my-app-actions-123/capsule.yaml --regression
 ```
 
 Save and fork a prepared workspace:

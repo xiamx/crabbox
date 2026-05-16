@@ -38,6 +38,7 @@ type crabboxKongCLI struct {
 	Usage      usageKongCmd      `cmd:"" passthrough:"" help:"Show cost and usage estimates by user, org, or fleet."`
 	Admin      adminKongCmd      `cmd:"" help:"Lease admin controls for trusted operators."`
 	Actions    actionsKongCmd    `cmd:"" help:"Register GitHub Actions runners or dispatch workflows."`
+	Capsule    capsuleKongCmd    `cmd:"" help:"Capture and replay lightweight failure capsules."`
 	Checkpoint checkpointKongCmd `cmd:"" help:"Create, restore, and fork VM or workspace checkpoints."`
 	Ssh        sshKongCmd        `cmd:"" name:"ssh" passthrough:"" help:"Print the SSH command for a lease."`
 	Vnc        vncKongCmd        `cmd:"" name:"vnc" passthrough:"" help:"Print or open VNC connection details for a desktop lease."`
@@ -115,7 +116,7 @@ func normalizeKongHelpArgs(args []string) []string {
 
 func isKongCommandGroup(command string) bool {
 	switch command {
-	case "actions", "admin", "artifacts", "azure", "cache", "checkpoint", "config", "desktop", "image", "job", "machine", "media", "pool":
+	case "actions", "admin", "artifacts", "azure", "cache", "capsule", "checkpoint", "config", "desktop", "image", "job", "machine", "media", "pool":
 		return true
 	default:
 		return false
@@ -354,6 +355,25 @@ type actionsDispatchKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 
+type capsuleKongCmd struct {
+	FromActions capsuleFromActionsKongCmd `cmd:"" name:"from-actions" passthrough:"" help:"Create a capsule from a GitHub Actions run URL."`
+	Replay      capsuleReplayKongCmd      `cmd:"" passthrough:"" help:"Replay a capsule using Crabbox run."`
+	Inspect     capsuleInspectKongCmd     `cmd:"" passthrough:"" help:"Inspect a capsule manifest and replay history."`
+	Promote     capsulePromoteKongCmd     `cmd:"" passthrough:"" help:"Promote a capsule as a regression."`
+}
+type capsuleFromActionsKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type capsuleReplayKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type capsuleInspectKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type capsulePromoteKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+
 type checkpointKongCmd struct {
 	Create  checkpointCreateKongCmd  `cmd:"" passthrough:"" help:"Create a VM or workspace checkpoint from a lease."`
 	List    checkpointListKongCmd    `cmd:"" passthrough:"" help:"List local checkpoints."`
@@ -544,6 +564,19 @@ func (c *actionsRegisterKongCmd) Run(ctx context.Context, app App) error {
 }
 func (c *actionsDispatchKongCmd) Run(ctx context.Context, app App) error {
 	return app.actionsDispatch(ctx, c.Args)
+}
+
+func (c *capsuleFromActionsKongCmd) Run(ctx context.Context, app App) error {
+	return app.capsuleFromActions(ctx, stripKongCommandPath(c.Args, "capsule", "from-actions"))
+}
+func (c *capsuleReplayKongCmd) Run(ctx context.Context, app App) error {
+	return app.capsuleReplay(ctx, stripKongCommandPath(c.Args, "capsule", "replay"))
+}
+func (c *capsuleInspectKongCmd) Run(ctx context.Context, app App) error {
+	return app.capsuleInspect(ctx, stripKongCommandPath(c.Args, "capsule", "inspect"))
+}
+func (c *capsulePromoteKongCmd) Run(ctx context.Context, app App) error {
+	return app.capsulePromote(ctx, stripKongCommandPath(c.Args, "capsule", "promote"))
 }
 
 func (c *checkpointCreateKongCmd) Run(ctx context.Context, app App) error {

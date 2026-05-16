@@ -20,6 +20,7 @@ func init() {
 	RegisterProvider(testModalProvider{})
 	RegisterProvider(testCloudflareProvider{})
 	RegisterProvider(testSpritesProvider{})
+	RegisterProvider(testOVHProvider{})
 }
 
 type testAzureProvider struct{}
@@ -655,4 +656,27 @@ func (b testSSHBackend) ReleaseLease(context.Context, ReleaseLeaseRequest) error
 }
 func (b testSSHBackend) Touch(context.Context, TouchRequest) (Server, error) {
 	return Server{}, nil
+}
+
+type testOVHProvider struct{}
+
+func (testOVHProvider) Name() string { return "ovh" }
+func (testOVHProvider) Aliases() []string {
+	return []string{"ovhcloud", "ovh-cloud"}
+}
+func (testOVHProvider) Spec() ProviderSpec {
+	return ProviderSpec{
+		Name:        "ovh",
+		Kind:        ProviderKindSSHLease,
+		Targets:     []TargetSpec{{OS: targetLinux}},
+		Features:    FeatureSet{FeatureSSH, FeatureCrabboxSync, FeatureCleanup, FeatureTailscale},
+		Coordinator: CoordinatorSupported,
+	}
+}
+func (testOVHProvider) RegisterFlags(*flag.FlagSet, Config) any { return noProviderFlags{} }
+func (testOVHProvider) ApplyFlags(*Config, *flag.FlagSet, any) error {
+	return nil
+}
+func (p testOVHProvider) Configure(cfg Config, rt Runtime) (Backend, error) {
+	return testSSHBackend{spec: p.Spec()}, nil
 }

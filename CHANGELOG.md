@@ -5,62 +5,50 @@
 ### Added
 
 - Added an AWS orphan-audit script for trusted operators to find Crabbox-tagged EC2 instances left behind in old provider accounts after credential or account rotation.
+- Added `crabbox admin mac-hosts` to list offerings, dry-run allocation requests, allocate, release, inspect quota, and print the EC2 Mac Dedicated Host IAM policy through the coordinator admin token.
+- Added `crabbox admin aws-identity`, `crabbox admin aws-policy`, and `crabbox admin aws-policy --mac-hosts` so trusted operators can identify the coordinator AWS principal and capture the baseline plus EC2 Mac host lifecycle IAM policy before paid macOS image work.
+- Added `scripts/macos-image-lifecycle-smoke.sh` for guarded AWS EC2 Mac host allocation, source macOS lease boot, WebVNC bridge proof, AMI creation, candidate-image smoke, promotion, promoted-image smoke, cleanup, and durable `summary.json` evidence.
+- Added a no-spend macOS host region preflight helper for checking reusable EC2 Mac Dedicated Hosts, dry-run allocation readiness, and Dedicated Mac host quota across configured AWS regions before approving paid allocation.
+- Added macOS image lifecycle evidence files for host discovery, quota, dry-run, allocation, image creation, image promotion, warmup, host wait, WebVNC daemon startup, WebVNC status, and artifact directories for blocked, partial, and completed runs.
 - Added provider-neutral `CRABBOX_HOST_ID` / `hostId` config for host-pinned leases while keeping `CRABBOX_AWS_MAC_HOST_ID` / `aws.macHostId` as AWS compatibility aliases.
 - Added provider-scoped admin entrypoints: `crabbox admin providers identity`, `crabbox admin providers policy`, and `crabbox admin hosts` for host lifecycle operations. Existing `admin aws-*` and `admin mac-hosts` commands remain compatibility aliases.
 - Added provider-neutral coordinator admin routes for host lifecycle and provider identity operations, while keeping the legacy AWS routes as compatibility fallbacks.
 - Added an account-guarded macOS image lifecycle IAM apply helper for trusted operators remediating coordinator AWS permissions from smoke artifacts, including automatic local AWS profile matching.
+- Added parsed IAM policy target details to `crabbox admin aws-identity --json` so operators know which role or user needs the macOS image lifecycle policy.
+- Added regression coverage for the guarded macOS image lifecycle smoke and configurable WebVNC post-start grace period.
 
 ### Changed
 
+- Changed AWS promoted image records to be scoped by target, architecture, server type, and region so macOS AMIs do not become the default image for Linux or Windows leases.
 - Changed the macOS host preflight and image lifecycle smoke to use the provider-neutral admin host/provider commands and `CRABBOX_HOST_ID` when pinning leases to an allocated host.
 - Changed the macOS image lifecycle smoke artifact to include the coordinator provider identity used for IAM remediation.
 - Changed macOS image lifecycle smoke blocker commands to use the guarded IAM apply helper for coordinator permission remediation.
 - Changed macOS image lifecycle blocked summaries to include a `blocker.reason` alias for automation that expects a short blocker reason.
 - Changed standalone macOS host region preflight blockers to use the guarded IAM apply helper instead of manual account-match shell snippets.
+- Hardened the macOS image lifecycle smoke so EC2 Mac Dedicated Host scrubbing, WebVNC daemon cleanup, active portal bridge checks, and `mac2.metal` to `mac1.metal` fallback are covered before image promotion.
+- Documented the AWS account-match and IAM remediation flow for attaching the combined macOS image lifecycle policy to the coordinator role or user.
+- Clarified the EC2 Mac host IAM policy, including create-time tag permissions, Dedicated Mac host quota checks, and the split between baseline AWS provider permissions and paid macOS image bake, WebVNC, promotion, and cleanup permissions.
+- Clarified AWS security guardrail docs so IAM Access Analyzer external-access analyzers are created in every configured capacity region, while S3 Block Public Access and IAM password policy remain account-level controls.
 
 ### Fixed
 
 - Fixed provider-neutral admin command errors so older coordinators report the neutral route and the legacy compatibility route that both returned 404.
-
-### Changed
-
-- Clarified AWS security guardrail docs so IAM Access Analyzer external-access analyzers are created in every configured capacity region, while S3 Block Public Access and IAM password policy remain account-level controls.
+- Fixed macOS image lifecycle and host-region preflight blockers so remediation commands use neutral `crabbox` commands and the guarded IAM apply helper instead of embedding local binary paths, checkout paths, or manual account-match snippets.
+- Fixed macOS image lifecycle blocked summaries so quota preflight failures, EC2 Mac host dry-run IAM failures, rerun commands, and short `blocker.reason` aliases are preserved in evidence.
+- Fixed macOS image lifecycle evidence and artifact summaries so paths are only populated after the matching files or directories are captured.
+- Fixed macOS image lifecycle cleanup and release paths so script-allocated hosts and local WebVNC daemons are stopped after source-only, candidate-only, blocked, partial, and completed runs.
+- Fixed EC2 Mac host dry-run JSON output so AWS authorization failures do not expose raw provider error details in operator logs.
+- Fixed missing coordinator Mac host admin endpoints so they report a blocked preflight instead of an empty preflight failure.
+- Fixed coordinator-backed macOS lease reuse so follow-up `run`, sync, and image smoke commands use the brokered `/Users/ec2-user/crabbox` work root instead of Linux's `/work/crabbox`.
+- Fixed remote macOS screenshots so `crabbox screenshot` captures the Screen Sharing/VNC framebuffer instead of relying on `screencapture` from non-interactive SSH sessions.
+- Fixed brokered AWS macOS launches so stale host ids, missing Mac hosts, regional AMI gaps, and unavailable `mac2.metal` capacity can fall back to usable host, region, image, or `mac1.metal` candidates.
+- Fixed AWS image deletion so scoped promoted macOS images cannot be deleted until another image is promoted.
 
 ## 0.14.0 - 2026-05-15
 
 ### Added
 
 - Added `crabbox admin lease-audit` so operators can compare expired brokered AWS lease records against live cloud instance state and fail automation when a record still maps to a live instance.
-- Added `crabbox admin mac-hosts` to list host offerings, dry-run allocation requests, allocate, and release AWS EC2 Mac Dedicated Hosts through the coordinator admin token.
-- Added `scripts/macos-image-lifecycle-smoke.sh` for guarded EC2 Mac host, WebVNC, AMI create, candidate smoke, promotion, and promoted-image smoke validation.
-- Hardened the macOS image lifecycle smoke so it waits for EC2 Mac Dedicated Host scrubbing between source, candidate, and promoted-image boots.
-- Hardened the macOS image lifecycle smoke so lease cleanup also stops each lease's local WebVNC daemon.
-- Hardened the macOS image lifecycle smoke so WebVNC must report an active portal bridge before artifacts are collected.
-- Fixed the macOS image lifecycle smoke so structured dry-run and allocation JSON are not polluted by command tracing before `jq` parses them.
-- Fixed the macOS image lifecycle smoke so `CRABBOX_MACOS_RELEASE_HOST=1` releases a script-allocated host after source-only and candidate-only runs too.
-- Fixed the macOS image lifecycle summary so evidence paths and artifact directories are only populated after the matching files are captured.
-- Fixed the macOS image lifecycle smoke so blocked preflight summaries classify completed stderr captures instead of racing streamed output.
-- Documented the concrete IAM remediation commands for attaching the combined macOS image lifecycle policy to the coordinator AWS role or user.
-- Documented the AWS account-match preflight for macOS image lifecycle IAM remediation so operators do not attach the policy from the wrong local profile.
-- Added parsed IAM policy target details to `crabbox admin aws-identity --json` so operators know which role or user needs the macOS image lifecycle policy.
-- Added AWS account-match commands to blocked macOS image lifecycle summaries so artifact-driven IAM remediation does not target the wrong local profile.
-- Added AWS account-match commands to standalone macOS host region preflight blockers for safer IAM remediation from preflight artifacts.
-- Fixed the macOS image lifecycle smoke so Mac host quota preflight failures are preserved as evidence even when EC2 Mac host dry-run is also blocked.
-- Fixed the macOS image lifecycle smoke so combined quota and EC2 Mac host dry-run IAM blockers include rerun commands for both preflights.
-- Added a no-spend macOS host region preflight helper for checking reusable EC2 Mac Dedicated Hosts, dry-run allocation readiness, and Dedicated Mac host quota across configured regions.
-- Hardened the no-spend macOS host region preflight so it checks `mac2.metal` and then `mac1.metal` by default, and carries the selected type into lifecycle allocation.
-- Added automatic region preflight integration to the macOS image lifecycle smoke when `CRABBOX_MACOS_REGIONS` is set and no single `CRABBOX_MACOS_REGION` is forced.
-- Added `crabbox admin mac-hosts quota` and a guarded lifecycle smoke preflight so EC2 Mac Dedicated Host quota is checked before paid host allocation.
-- Added a macOS image lifecycle `summary.json` artifact with the run phase, host id, lease ids, AMI id, and artifact paths for blocked, partial, and completed runs.
-- Added remediation text and commands to blocked macOS image lifecycle summaries so IAM and coordinator preflight failures are actionable from the artifact.
-- Added baseline AWS provider, EC2 Mac host, and combined macOS image IAM policy JSON files to the macOS image lifecycle evidence bundle.
-- Added stable macOS image lifecycle evidence files for host discovery, allocation, image creation, and image promotion outputs.
-- Added stable macOS image lifecycle warmup, host wait, WebVNC daemon, and WebVNC status evidence paths to make live image-bake failures diagnosable from the run artifact alone.
-- Added regression coverage for the guarded macOS image lifecycle smoke and made its WebVNC post-start grace period configurable.
-- Added `crabbox admin mac-hosts policy` to print the AWS IAM policy needed for EC2 Mac host lifecycle operations.
-- Added `crabbox admin aws-identity` to show the coordinator AWS caller identity before applying EC2 Mac host lifecycle IAM policy.
-- Added `crabbox admin aws-policy` to print the baseline brokered AWS provider IAM policy used by launch, image, WebVNC, promotion, and cleanup validation.
-- Added `crabbox admin aws-policy --mac-hosts` to print one combined brokered AWS plus EC2 Mac Dedicated Host lifecycle IAM policy.
 - Added `crabbox checkpoint` native disk-snapshot checkpoints for brokered AWS, Azure, and GCP Linux leases, optional provider image checkpoints via `--strategy image`, local workspace archives for generic POSIX SSH leases, inspect/list/delete flows, archive restore, and checkpoint forks into fresh leases.
 - Added checkpoint audit and cleanup management with `crabbox checkpoint list --verify`, `inspect --verify`, and `prune --older-than`.
 - Added `provider: cloudflare` delegated runs for Cloudflare Containers through a Worker runner, including archive sync, warm containers, local claim cleanup, and deployment docs. Thanks @altaywtf.
@@ -73,24 +61,11 @@
 ### Changed
 
 - Improved checkpoint documentation with clearer native vs archive distinction, workflow mechanics, security warnings, and command reference examples.
-- Clarified the EC2 Mac host IAM policy, including the create-time tag permission needed by `crabbox admin mac-hosts allocate --dry-run`.
-- Clarified that the EC2 Mac host lifecycle policy is separate from the baseline AWS provider permissions needed for paid macOS image bake, WebVNC, promotion, and cleanup validation.
-- Clarified that AWS Dedicated Mac host quota can block real host allocation after IAM dry-run succeeds.
 
 ### Fixed
 
-- Fixed macOS image lifecycle and host-region preflight blockers so remediation commands use neutral `crabbox` commands instead of embedding local binary or checkout paths.
 - Fixed delegated Blacksmith Testbox warmup/run flows so successful allocations refresh the coordinator runner portal instead of waiting for a later manual list.
 - Fixed Code bridge upstream URL handling so browser-controlled paths cannot select a non-loopback upstream target, and clamped `CRABBOX_AWS_ROOT_GB` parsing to valid `int32` values.
-- Fixed EC2 Mac host dry-run JSON output so AWS authorization failures do not expose raw provider error details in operator logs.
-- Fixed the macOS image lifecycle smoke so missing coordinator Mac host admin endpoints are reported as a blocked preflight instead of an empty preflight failure.
-- Fixed AWS image promotion so macOS AMIs are scoped by target, architecture, and region instead of becoming the default for every AWS lease.
-- Fixed coordinator-backed macOS lease reuse so follow-up `run`, sync, and image smoke commands use the brokered `/Users/ec2-user/crabbox` work root instead of Linux's `/work/crabbox`.
-- Fixed remote macOS screenshots so `crabbox screenshot` captures the Screen Sharing/VNC framebuffer instead of relying on `screencapture` from non-interactive SSH sessions.
-- Fixed brokered AWS macOS launches so a stale configured Dedicated Host id can fall back to discovering another available EC2 Mac Dedicated Host in the selected region.
-- Fixed brokered AWS macOS region fallback so missing Mac hosts or regional macOS AMIs do not stop the configured region search early.
-- Fixed AWS macOS class fallback so `mac1.metal` can satisfy a request with a matching AMI when `mac2.metal` capacity is unavailable and no exact `--type` is set.
-- Fixed AWS image deletion so scoped promoted macOS images cannot be deleted until another image is promoted.
 - Fixed `crabbox admin lease-audit --fail-on-live` so recently terminated AWS instances returned by `DescribeInstances` do not fail cleanup automation as live resources.
 - Fixed checkpoint archive restores so large archives stream over SSH without buffering the full tarball in memory and unpack through a per-restore remote temp file. Thanks @stainlu.
 - Fixed Daytona toolbox archive sync so failed remote extracts still remove the uploaded `/tmp/crabbox-*.tgz` archive. Thanks @stainlu.

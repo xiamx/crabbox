@@ -23,7 +23,7 @@ func bootstrapManagedWindowsDesktop(ctx context.Context, cfg Config, target *SSH
 	}
 	if cfg.Provider == "azure" && cfg.WindowsMode == windowsModeNormal && cfg.Desktop {
 		bootstrapTarget := *target
-		return runWindowsDesktopBootstrapOverSSH(ctx, cfg, target, bootstrapTarget, publicKey, stderr)
+		return runWindowsBootstrapOverSSH(ctx, cfg, target, bootstrapTarget, publicKey, stderr, "Windows desktop bootstrap")
 	}
 	if cfg.Provider != "aws" {
 		return waitForSSHReady(ctx, target, stderr, "bootstrap", bootstrapWaitTimeout(cfg))
@@ -32,18 +32,22 @@ func bootstrapManagedWindowsDesktop(ctx context.Context, cfg Config, target *SSH
 	bootstrapTarget.User = "Administrator"
 	bootstrapTarget.WindowsMode = windowsModeNormal
 	bootstrapTarget.ReadyCheck = powershellCommand(`$PSVersionTable.PSVersion | Out-Null`)
-	return runWindowsDesktopBootstrapOverSSH(ctx, cfg, target, bootstrapTarget, publicKey, stderr)
+	phase := "Windows core bootstrap"
+	if cfg.Desktop {
+		phase = "Windows desktop bootstrap"
+	}
+	return runWindowsBootstrapOverSSH(ctx, cfg, target, bootstrapTarget, publicKey, stderr, phase)
 }
 
 func bootstrapAWSWindowsDesktop(ctx context.Context, cfg Config, target *SSHTarget, publicKey string, stderr io.Writer) error {
 	return bootstrapManagedWindowsDesktop(ctx, cfg, target, publicKey, stderr)
 }
 
-func runWindowsDesktopBootstrapOverSSH(ctx context.Context, cfg Config, target *SSHTarget, bootstrapTarget SSHTarget, publicKey string, stderr io.Writer) error {
+func runWindowsBootstrapOverSSH(ctx context.Context, cfg Config, target *SSHTarget, bootstrapTarget SSHTarget, publicKey string, stderr io.Writer, phase string) error {
 	if err := waitForSSHReady(ctx, &bootstrapTarget, stderr, "windows openssh", 20*time.Minute); err != nil {
 		return err
 	}
-	fmt.Fprintln(stderr, "running Windows desktop bootstrap over SSH")
+	fmt.Fprintf(stderr, "running %s over SSH\n", phase)
 	remote := powershellCommand(`$ErrorActionPreference = "Stop"
 $path = "C:\ProgramData\crabbox-bootstrap.ps1"
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
@@ -52,7 +56,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path
 exit $LASTEXITCODE`)
 	err := runSSHInputQuiet(ctx, bootstrapTarget, remote, windowsBootstrapPowerShell(cfg, publicKey))
 	if err != nil {
-		fmt.Fprintf(stderr, "warning: Windows bootstrap SSH command ended before completion; waiting for reboot/ready state: %v\n", err)
+		fmt.Fprintf(stderr, "warning: %s SSH command ended before completion; waiting for reboot/ready state: %v\n", phase, err)
 	}
 	if err := waitForSSHReady(ctx, target, stderr, "bootstrap", bootstrapWaitTimeout(cfg)); err != nil {
 		return err

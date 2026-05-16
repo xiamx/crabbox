@@ -15,6 +15,7 @@
 ### Fixed
 
 - Fixed brokered Azure leases so the CLI only sends `azureOSDisk` when the user explicitly configures it, preserving the coordinator default while keeping new Azure leases checkpointable by default. Thanks @jwmoss.
+- Fixed managed Windows bootstraps so native Windows leases skip desktop/VNC setup unless `--desktop` is requested, while WSL2 leases keep their Windows core and Linux setup paths separate. Thanks @jwmoss.
 - Fixed WebVNC `--take-control` handoff links so the portal keeps retrying the automatic control claim until the opened viewer is registered as an observer.
 - Fixed WebVNC portal click forwarding so controller clicks reach the remote desktop while preserving focus and browser context-menu suppression.
 

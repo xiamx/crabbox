@@ -16,7 +16,7 @@ debugging.
 | Target | Managed | Notes |
 | --- | --- | --- |
 | Linux | Yes | Spot by default; On-Demand optional; cloud-init bootstrap. |
-| Windows native | Yes | EC2Launch, OpenSSH, Git for Windows, TightVNC, archive sync, first-network flyout suppression. |
+| Windows native | Yes | EC2Launch, OpenSSH, Git for Windows, archive sync; optional TightVNC/autologon with `--desktop`. |
 | Windows WSL2 | Yes | Nested virtualization on C8i/M8i/R8i families; POSIX sync through WSL. |
 | macOS | Yes | EC2 Mac Dedicated Host id required; On-Demand only. |
 

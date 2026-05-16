@@ -17,8 +17,8 @@ gcp         Google Cloud Compute Engine instances
 
 Brokered Hetzner leases are Linux targets. Brokered AWS supports Linux, native
 Windows Server, Windows WSL2, and EC2 Mac when a Dedicated Host is configured.
-Brokered Azure supports Linux and native Windows SSH/sync/run. Brokered GCP
-supports Linux SSH/sync/run. Static SSH still
+Brokered Azure supports Linux, native Windows, and Windows WSL2 SSH/sync/run.
+Brokered GCP supports Linux SSH/sync/run. Static SSH still
 exists for reusing existing macOS and Windows machines:
 
 ```text
@@ -73,9 +73,9 @@ tensorlake Tensorlake Firecracker sandboxes with delegated command execution
 - imports or reuses an EC2 key pair;
 - creates or reuses the `crabbox-runners` security group with SSH ingress limited to configured CIDRs or the request source IP;
 - launches one-time Linux Spot or On-Demand instances;
-- launches AWS Windows Server desktop leases with EC2Launch PowerShell user
-  data, OpenSSH, Git for Windows, TightVNC, and first-network flyout
-  suppression when `target=windows`;
+- launches AWS Windows Server leases with EC2Launch PowerShell user data, then a
+  post-SSH Crabbox bootstrap for OpenSSH/Git/user setup; `--desktop` adds
+  TightVNC, auto-logon, and first-network flyout suppression;
 - launches EC2 Mac leases only with an explicit Dedicated Host id
   (`CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`) and On-Demand capacity;
 - tags instances, volumes, and Spot requests;

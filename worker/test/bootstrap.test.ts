@@ -193,6 +193,7 @@ describe("cloud-init bootstrap", () => {
     const input = {
       ...config,
       target: "windows",
+      desktop: true,
       workRoot: "C:\\crabbox",
     } as const;
     expect(awsUserData(input)).toContain("version: 1.1");
@@ -229,6 +230,54 @@ describe("cloud-init bootstrap", () => {
     expect(got).toContain("C:\\ProgramData\\crabbox\\windows.username");
     expect(got).toContain("AutoAdminLogon");
     expect(got).toContain("Restart-Computer -Force");
+  });
+
+  it("builds Windows core bootstrap without desktop/VNC", () => {
+    const input = {
+      ...config,
+      target: "windows",
+      workRoot: "C:\\crabbox",
+    } as const;
+    const got = windowsBootstrapPowerShell(input);
+    expect(got).toContain("OpenSSH-Win64.zip");
+    expect(got).toContain("Git-2.52.0-64-bit.exe");
+    expect(got).toContain("$passwordPath = $windowsPasswordPath");
+    expect(got).toContain("Restart-Service sshd -Force");
+    expect(got).toContain("Set-Content -NoNewline -Encoding ASCII -Path $setupCompletePath");
+    expect(got).not.toContain("tightvnc-2.8.85-gpl-setup-64bit.msi");
+    expect(got).not.toContain("C:\\ProgramData\\crabbox\\vnc.password");
+    expect(got).not.toContain("CrabboxUserVNC");
+    expect(got).not.toContain("AutoAdminLogon");
+    expect(got).not.toContain("Restart-Computer -Force");
+  });
+
+  it("builds Windows WSL2 bootstrap without desktop/VNC", () => {
+    const input = {
+      ...config,
+      target: "windows",
+      windowsMode: "wsl2",
+      workRoot: "/work/crabbox",
+    } as const;
+    const got = windowsBootstrapPowerShell(input);
+    expect(got).toContain("$workRoot = 'C:\\crabbox'");
+    expect(got).toContain("C:\\ProgramData\\crabbox\\windows.password");
+    expect(got).toContain("Microsoft-Windows-Subsystem-Linux");
+    expect(got).toContain("VirtualMachinePlatform");
+    expect(got).toContain("HypervisorPlatform");
+    expect(got).toContain("bcdedit.exe /set hypervisorlaunchtype auto");
+    expect(got).toContain("wsl.exe --update --web-download");
+    expect(got).toContain("wsl.exe --set-default-version 2");
+    expect(got).toContain("ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz");
+    expect(got).toContain("$wslRootfsMinBytes = 100 * 1024 * 1024");
+    expect(got).toContain("curl.exe -fL --retry 8");
+    expect(got).toContain("downloaded WSL rootfs is incomplete");
+    expect(got).toContain("wsl.exe --import $wslDistro $wslRoot $wslRootfs --version 2");
+    expect(got).toContain("wsl.exe --set-default $wslDistro");
+    expect(got).toContain("test -w '/work/crabbox'");
+    expect(got).not.toContain("tightvnc-2.8.85-gpl-setup-64bit.msi");
+    expect(got).not.toContain("C:\\ProgramData\\crabbox\\vnc.password");
+    expect(got).not.toContain("CrabboxUserVNC");
+    expect(got).not.toContain("AutoAdminLogon");
   });
 
   it("builds Azure Windows extension bootstrap without restart", () => {

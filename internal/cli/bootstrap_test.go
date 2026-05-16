@@ -206,6 +206,7 @@ func TestAWSUserDataWindowsProfile(t *testing.T) {
 	cfg.Provider = "aws"
 	cfg.TargetOS = targetWindows
 	cfg.WindowsMode = windowsModeNormal
+	cfg.Desktop = true
 	cfg.WorkRoot = `C:\crabbox`
 	userData := awsUserData(cfg, "ssh-ed25519 test")
 	if !strings.Contains(userData, "version: 1.1") || !strings.Contains(userData, "task: enableOpenSsh") {
@@ -265,6 +266,37 @@ func TestAWSUserDataWindowsProfile(t *testing.T) {
 	}
 }
 
+func TestAWSUserDataWindowsCoreProfileSkipsDesktop(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Provider = "aws"
+	cfg.TargetOS = targetWindows
+	cfg.WindowsMode = windowsModeNormal
+	cfg.WorkRoot = `C:\crabbox`
+	got := windowsBootstrapPowerShell(cfg, "ssh-ed25519 test")
+	for _, want := range []string{
+		"OpenSSH-Win64.zip",
+		"Git-2.52.0-64-bit.exe",
+		"$passwordPath = $windowsPasswordPath",
+		"Restart-Service sshd -Force",
+		"Set-Content -NoNewline -Encoding ASCII -Path $setupCompletePath",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("windows core bootstrap missing %q", want)
+		}
+	}
+	for _, notWant := range []string{
+		"tightvnc-2.8.85-gpl-setup-64bit.msi",
+		`C:\ProgramData\crabbox\vnc.password`,
+		"CrabboxUserVNC",
+		"AutoAdminLogon",
+		"Restart-Computer -Force",
+	} {
+		if strings.Contains(got, notWant) {
+			t.Fatalf("windows core bootstrap should not include %q", notWant)
+		}
+	}
+}
+
 func TestAWSUserDataWindowsWSL2Profile(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Provider = "aws"
@@ -273,7 +305,8 @@ func TestAWSUserDataWindowsWSL2Profile(t *testing.T) {
 	cfg.WorkRoot = `/work/crabbox`
 	got := windowsBootstrapPowerShell(cfg, "ssh-ed25519 test")
 	for _, want := range []string{
-		"$wslMode = $true",
+		`$workRoot = 'C:\crabbox'`,
+		`C:\ProgramData\crabbox\windows.password`,
 		"Microsoft-Windows-Subsystem-Linux",
 		"VirtualMachinePlatform",
 		"HypervisorPlatform",
@@ -299,6 +332,16 @@ func TestAWSUserDataWindowsWSL2Profile(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("windows WSL2 bootstrap missing %q", want)
+		}
+	}
+	for _, notWant := range []string{
+		"tightvnc-2.8.85-gpl-setup-64bit.msi",
+		`C:\ProgramData\crabbox\vnc.password`,
+		"CrabboxUserVNC",
+		"AutoAdminLogon",
+	} {
+		if strings.Contains(got, notWant) {
+			t.Fatalf("windows WSL2 bootstrap should not include %q", notWant)
 		}
 	}
 }

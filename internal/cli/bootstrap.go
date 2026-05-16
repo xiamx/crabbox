@@ -223,97 +223,135 @@ foreach ($path in @("C:\Program Files\OpenSSH", "C:\Program Files\Git\cmd", "C:\
 }
 
 func windowsBootstrapPowerShell(cfg Config, publicKey string) string {
-	workRoot := cfg.WorkRoot
-	if workRoot == "" {
-		workRoot = `C:\crabbox`
+	script := windowsBootstrapHeaderPowerShell(cfg, publicKey, windowsBootstrapWorkRoot(cfg)) +
+		windowsManagedCorePreludePowerShell(cfg) +
+		windowsBootstrapCorePowerShell()
+	if cfg.WindowsMode == windowsModeWSL2 {
+		return script + windowsWSL2BootstrapPowerShell(cfg)
 	}
-	wslMode := cfg.WindowsMode == windowsModeWSL2
-	return windowsBootstrapHeaderPowerShell(cfg, publicKey, workRoot) + `
-$wslMode = $` + fmt.Sprint(wslMode) + `
-$wslDistro = "Crabbox"
-$wslRoot = "C:\ProgramData\crabbox\wsl\Crabbox"
-$wslRootfs = "C:\ProgramData\crabbox\wsl\ubuntu-noble-wsl-amd64.rootfs.tar.gz"
-$wslRootfsDownload = "$wslRootfs.download"
-$wslRootfsMinBytes = 100 * 1024 * 1024
-$wslSetup = "C:\ProgramData\crabbox\wsl\linux-setup.sh"
-$wslFeaturesMarker = "C:\ProgramData\crabbox\wsl-features-rebooted"
-$wslKernelMarker = "C:\ProgramData\crabbox\wsl-kernel-rebooted"
-$vncPasswordPath = "C:\ProgramData\crabbox\vnc.password"
-$windowsUsernamePath = "C:\ProgramData\crabbox\windows.username"
-$windowsPasswordPath = "C:\ProgramData\crabbox\windows.password"
-$passwordPath = $vncPasswordPath
-$usernamePath = $windowsUsernamePath
-$passwordMirrorPath = $windowsPasswordPath
-$enforceKeyAuth = $false
-$userVNCStartupPath = "C:\ProgramData\crabbox\start-user-vnc.ps1"
-$userVNCStartupCommandPath = Join-Path (Join-Path (Join-Path "C:\Users" $user) "AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup") "crabbox-user-vnc.cmd"
-$tightVNCInstaller = "$env:TEMP\tightvnc-2.8.85-gpl-setup-64bit.msi"
-function Restart-CrabboxBootstrap($MarkerPath) {
-  Set-Content -NoNewline -Encoding ASCII -Path $MarkerPath -Value (Get-Date).ToString("o")
-  Restart-Computer -Force
-  exit 0
+	if cfg.Desktop {
+		return script + windowsDesktopBootstrapPowerShell()
+	}
+	return script + windowsCoreBootstrapFinalizePowerShell()
 }
-function Initialize-CrabboxWSL2 {
-  if (-not $wslMode) { return }
-  $needsFeatureReboot = $false
-  foreach ($feature in @("Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform", "HypervisorPlatform")) {
-    $state = (Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction SilentlyContinue).State
-    if ($state -ne "Enabled") {
-      dism.exe /online /enable-feature /featurename:$feature /all /norestart | Out-Host
-      if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "enable $feature failed with exit $LASTEXITCODE" }
-      $needsFeatureReboot = $true
-    }
-  }
-  bcdedit.exe /set hypervisorlaunchtype auto | Out-Host
-  if ($LASTEXITCODE -ne 0) { throw "bcdedit hypervisorlaunchtype failed with exit $LASTEXITCODE" }
-  if ($needsFeatureReboot -and -not (Test-Path -LiteralPath $wslFeaturesMarker)) {
-    Restart-CrabboxBootstrap $wslFeaturesMarker
-  }
-  if (-not (Test-Path -LiteralPath $wslKernelMarker)) {
-    wsl.exe --update --web-download | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "wsl --update --web-download failed with exit $LASTEXITCODE" }
-    Restart-CrabboxBootstrap $wslKernelMarker
-  }
-  wsl.exe --set-default-version 2 | Out-Host
-  if ($LASTEXITCODE -ne 0) { throw "wsl --set-default-version 2 failed with exit $LASTEXITCODE" }
-  $distros = (wsl.exe --list --quiet 2>$null) -join [Environment]::NewLine
-  if ($distros -notmatch "(?m)^$([Regex]::Escape($wslDistro))$") {
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $wslRoot), $wslRoot | Out-Null
-    if ((Test-Path -LiteralPath $wslRootfs) -and ((Get-Item -LiteralPath $wslRootfs).Length -lt $wslRootfsMinBytes)) {
-      Remove-Item -Force -LiteralPath $wslRootfs
-    }
-    if (-not (Test-Path -LiteralPath $wslRootfs)) {
-      Remove-Item -Force -LiteralPath $wslRootfsDownload -ErrorAction SilentlyContinue
-      Retry {
-        $expectedLength = 0
-        try {
-          $head = Invoke-WebRequest -Uri ` + psQuote(ubuntuWSLRootFSURL) + ` -Method Head -UseBasicParsing
-          if ($head.Headers.ContainsKey("Content-Length")) {
-            [void][Int64]::TryParse(($head.Headers["Content-Length"] | Select-Object -First 1), [ref]$expectedLength)
-          }
-        } catch {
-          $expectedLength = 0
-        }
-        if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
-          & curl.exe -fL --retry 8 --retry-delay 5 --connect-timeout 30 --speed-time 30 --speed-limit 1024 -o $wslRootfsDownload ` + psQuote(ubuntuWSLRootFSURL) + `
-          if ($LASTEXITCODE -ne 0) { throw "download WSL rootfs failed with exit $LASTEXITCODE" }
-        } else {
-          Invoke-WebRequest -Uri ` + psQuote(ubuntuWSLRootFSURL) + ` -OutFile $wslRootfsDownload -UseBasicParsing
-        }
-        $actualLength = (Get-Item -LiteralPath $wslRootfsDownload).Length
-        if ($actualLength -lt $wslRootfsMinBytes) { throw "downloaded WSL rootfs is incomplete" }
-        if ($expectedLength -gt 0 -and $actualLength -ne $expectedLength) {
-          throw "downloaded WSL rootfs is incomplete: $actualLength of $expectedLength bytes"
-        }
-      }
-      Move-Item -Force -LiteralPath $wslRootfsDownload -Destination $wslRootfs
-    }
-    wsl.exe --import $wslDistro $wslRoot $wslRootfs --version 2 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "wsl --import failed with exit $LASTEXITCODE" }
-    wsl.exe --set-default $wslDistro | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "wsl --set-default failed with exit $LASTEXITCODE" }
-  }
-  $linuxSetup = @'
+
+func windowsBootstrapWorkRoot(cfg Config) string {
+	if cfg.WindowsMode == windowsModeWSL2 {
+		return defaultWindowsWorkRoot
+	}
+	if cfg.WorkRoot != "" {
+		return cfg.WorkRoot
+	}
+	return defaultWindowsWorkRoot
+}
+
+func windowsWSLWorkRoot(cfg Config) string {
+	if cfg.WorkRoot != "" {
+		return cfg.WorkRoot
+	}
+	return defaultPOSIXWorkRoot
+}
+
+func windowsManagedCorePreludePowerShell(cfg Config) string {
+	if cfg.WindowsMode == windowsModeNormal && cfg.Desktop {
+		return `
+	$vncPasswordPath = "C:\ProgramData\crabbox\vnc.password"
+	$windowsUsernamePath = "C:\ProgramData\crabbox\windows.username"
+	$windowsPasswordPath = "C:\ProgramData\crabbox\windows.password"
+	$passwordPath = $vncPasswordPath
+	$usernamePath = $windowsUsernamePath
+	$passwordMirrorPath = $windowsPasswordPath
+	$enforceKeyAuth = $false
+	$userVNCStartupPath = "C:\ProgramData\crabbox\start-user-vnc.ps1"
+	$userVNCStartupCommandPath = Join-Path (Join-Path (Join-Path "C:\Users" $user) "AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup") "crabbox-user-vnc.cmd"
+	$tightVNCInstaller = "$env:TEMP\tightvnc-2.8.85-gpl-setup-64bit.msi"
+	`
+	}
+	return `
+	$windowsUsernamePath = "C:\ProgramData\crabbox\windows.username"
+	$windowsPasswordPath = "C:\ProgramData\crabbox\windows.password"
+	$passwordPath = $windowsPasswordPath
+	$usernamePath = $windowsUsernamePath
+	$passwordMirrorPath = $null
+	$enforceKeyAuth = $false
+	`
+}
+
+func windowsWSL2BootstrapPowerShell(cfg Config) string {
+	workRoot := windowsWSLWorkRoot(cfg)
+	return `
+	$wslDistro = "Crabbox"
+	$wslRoot = "C:\ProgramData\crabbox\wsl\Crabbox"
+	$wslRootfs = "C:\ProgramData\crabbox\wsl\ubuntu-noble-wsl-amd64.rootfs.tar.gz"
+	$wslRootfsDownload = "$wslRootfs.download"
+	$wslRootfsMinBytes = 100 * 1024 * 1024
+	$wslSetup = "C:\ProgramData\crabbox\wsl\linux-setup.sh"
+	$wslFeaturesMarker = "C:\ProgramData\crabbox\wsl-features-rebooted"
+	$wslKernelMarker = "C:\ProgramData\crabbox\wsl-kernel-rebooted"
+	function Restart-CrabboxBootstrap($MarkerPath) {
+	  Set-Content -NoNewline -Encoding ASCII -Path $MarkerPath -Value (Get-Date).ToString("o")
+	  Restart-Computer -Force
+	  exit 0
+	}
+	$needsFeatureReboot = $false
+	foreach ($feature in @("Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform", "HypervisorPlatform")) {
+	  $state = (Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction SilentlyContinue).State
+	  if ($state -ne "Enabled") {
+	    dism.exe /online /enable-feature /featurename:$feature /all /norestart | Out-Host
+	    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "enable $feature failed with exit $LASTEXITCODE" }
+	    $needsFeatureReboot = $true
+	  }
+	}
+	bcdedit.exe /set hypervisorlaunchtype auto | Out-Host
+	if ($LASTEXITCODE -ne 0) { throw "bcdedit hypervisorlaunchtype failed with exit $LASTEXITCODE" }
+	if ($needsFeatureReboot -and -not (Test-Path -LiteralPath $wslFeaturesMarker)) {
+	  Restart-CrabboxBootstrap $wslFeaturesMarker
+	}
+	if (-not (Test-Path -LiteralPath $wslKernelMarker)) {
+	  wsl.exe --update --web-download | Out-Host
+	  if ($LASTEXITCODE -ne 0) { throw "wsl --update --web-download failed with exit $LASTEXITCODE" }
+	  Restart-CrabboxBootstrap $wslKernelMarker
+	}
+	wsl.exe --set-default-version 2 | Out-Host
+	if ($LASTEXITCODE -ne 0) { throw "wsl --set-default-version 2 failed with exit $LASTEXITCODE" }
+	$distros = (wsl.exe --list --quiet 2>$null) -join [Environment]::NewLine
+	if ($distros -notmatch "(?m)^$([Regex]::Escape($wslDistro))$") {
+	  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $wslRoot), $wslRoot | Out-Null
+	  if ((Test-Path -LiteralPath $wslRootfs) -and ((Get-Item -LiteralPath $wslRootfs).Length -lt $wslRootfsMinBytes)) {
+	    Remove-Item -Force -LiteralPath $wslRootfs
+	  }
+	  if (-not (Test-Path -LiteralPath $wslRootfs)) {
+	    Remove-Item -Force -LiteralPath $wslRootfsDownload -ErrorAction SilentlyContinue
+	    Retry {
+	      $expectedLength = 0
+	      try {
+	        $head = Invoke-WebRequest -Uri ` + psQuote(ubuntuWSLRootFSURL) + ` -Method Head -UseBasicParsing
+	        if ($head.Headers.ContainsKey("Content-Length")) {
+	          [void][Int64]::TryParse(($head.Headers["Content-Length"] | Select-Object -First 1), [ref]$expectedLength)
+	        }
+	      } catch {
+	        $expectedLength = 0
+	      }
+	      if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+	        & curl.exe -fL --retry 8 --retry-delay 5 --connect-timeout 30 --speed-time 30 --speed-limit 1024 -o $wslRootfsDownload ` + psQuote(ubuntuWSLRootFSURL) + `
+	        if ($LASTEXITCODE -ne 0) { throw "download WSL rootfs failed with exit $LASTEXITCODE" }
+	      } else {
+	        Invoke-WebRequest -Uri ` + psQuote(ubuntuWSLRootFSURL) + ` -OutFile $wslRootfsDownload -UseBasicParsing
+	      }
+	      $actualLength = (Get-Item -LiteralPath $wslRootfsDownload).Length
+	      if ($actualLength -lt $wslRootfsMinBytes) { throw "downloaded WSL rootfs is incomplete" }
+	      if ($expectedLength -gt 0 -and $actualLength -ne $expectedLength) {
+	        throw "downloaded WSL rootfs is incomplete: $actualLength of $expectedLength bytes"
+	      }
+	    }
+	    Move-Item -Force -LiteralPath $wslRootfsDownload -Destination $wslRootfs
+	  }
+	  wsl.exe --import $wslDistro $wslRoot $wslRootfs --version 2 | Out-Host
+	  if ($LASTEXITCODE -ne 0) { throw "wsl --import failed with exit $LASTEXITCODE" }
+	  wsl.exe --set-default $wslDistro | Out-Host
+	  if ($LASTEXITCODE -ne 0) { throw "wsl --set-default failed with exit $LASTEXITCODE" }
+	}
+	$linuxSetup = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 mkdir -p ` + shellQuote(workRoot) + ` /var/cache/crabbox/pnpm /var/cache/crabbox/npm /var/lib/crabbox
@@ -338,17 +376,21 @@ chmod 0755 /usr/local/bin/crabbox-ready
 touch /var/lib/crabbox/bootstrapped
 crabbox-ready
 '@
-  $linuxSetup = $linuxSetup.Replace(([string][char]13 + [string][char]10), ([string][char]10))
-  [IO.File]::WriteAllText($wslSetup, $linuxSetup, (New-Object Text.UTF8Encoding($false)))
-  wsl.exe -d $wslDistro --user root --exec bash /mnt/c/ProgramData/crabbox/wsl/linux-setup.sh
-  if ($LASTEXITCODE -ne 0) { throw "WSL setup failed with exit $LASTEXITCODE" }
+	$linuxSetup = $linuxSetup.Replace(([string][char]13 + [string][char]10), ([string][char]10))
+	[IO.File]::WriteAllText($wslSetup, $linuxSetup, (New-Object Text.UTF8Encoding($false)))
+	wsl.exe -d $wslDistro --user root --exec bash /mnt/c/ProgramData/crabbox/wsl/linux-setup.sh
+	if ($LASTEXITCODE -ne 0) { throw "WSL setup failed with exit $LASTEXITCODE" }
+	Restart-Service sshd -Force
+	Set-Content -NoNewline -Encoding ASCII -Path $setupCompletePath -Value (Get-Date).ToString("o")
+	`
 }
-` + windowsBootstrapCorePowerShell() + `
-Initialize-CrabboxWSL2
-if (-not (Test-Path -LiteralPath "C:\Program Files\TightVNC\tvnserver.exe")) {
-  Retry { Invoke-WebRequest -Uri ` + psQuote(tightVNCMSIURL) + ` -OutFile $tightVNCInstaller -UseBasicParsing }
-  $vncPassword = Get-Content -Raw -Path $vncPasswordPath
-  Start-Process -FilePath msiexec.exe -ArgumentList @(
+
+func windowsDesktopBootstrapPowerShell() string {
+	return `
+	if (-not (Test-Path -LiteralPath "C:\Program Files\TightVNC\tvnserver.exe")) {
+	  Retry { Invoke-WebRequest -Uri ` + psQuote(tightVNCMSIURL) + ` -OutFile $tightVNCInstaller -UseBasicParsing }
+	  $vncPassword = Get-Content -Raw -Path $vncPasswordPath
+	  Start-Process -FilePath msiexec.exe -ArgumentList @(
     "/i", $tightVNCInstaller, "/quiet", "/norestart",
     "ADDLOCAL=Server",
     "SERVER_REGISTER_AS_SERVICE=1",
@@ -408,16 +450,22 @@ Set-ItemProperty -Path $winlogon -Name DefaultPassword -Value $userPassword -Typ
 Restart-Service sshd
 if (-not (Test-Path -LiteralPath $setupCompletePath)) {
   Set-Content -NoNewline -Encoding ASCII -Path $setupCompletePath -Value (Get-Date).ToString("o")
-  Restart-Computer -Force
+	  Restart-Computer -Force
+	}
+	`
 }
-`
+
+func windowsCoreBootstrapFinalizePowerShell() string {
+	return `
+	Restart-Service sshd -Force
+	git --version | Out-Null
+	tar --version | Out-Null
+	Set-Content -NoNewline -Encoding ASCII -Path $setupCompletePath -Value (Get-Date).ToString("o")
+	`
 }
 
 func azureWindowsBootstrapPowerShell(cfg Config, publicKey string) string {
-	workRoot := cfg.WorkRoot
-	if workRoot == "" {
-		workRoot = defaultWindowsWorkRoot
-	}
+	workRoot := windowsBootstrapWorkRoot(cfg)
 	setupComplete := `Set-Content -NoNewline -Encoding ASCII -Path $setupCompletePath -Value (Get-Date).ToString("o")`
 	if cfg.Desktop {
 		setupComplete = ""

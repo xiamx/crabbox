@@ -34,5 +34,5 @@ func (Provider) ApplyFlags(*core.Config, *flag.FlagSet, any) error {
 	return nil
 }
 func (p Provider) Configure(cfg core.Config, rt core.Runtime) (core.Backend, error) {
-	return nil, nil
+	return NewOVHLeaseBackend(p.Spec(), cfg, rt), nil
 }

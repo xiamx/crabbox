@@ -5,16 +5,15 @@
 ### Added
 
 - Added an AWS orphan-audit script for trusted operators to find Crabbox-tagged EC2 instances left behind in old provider accounts after credential or account rotation.
-- Added `crabbox admin mac-hosts` to list offerings, dry-run allocation requests, allocate, release, inspect quota, and print the EC2 Mac Dedicated Host IAM policy through the coordinator admin token.
-- Added `crabbox admin aws-identity`, `crabbox admin aws-policy`, and `crabbox admin aws-policy --mac-hosts` so trusted operators can identify the coordinator AWS principal and capture the baseline plus EC2 Mac host lifecycle IAM policy before paid macOS image work.
+- Added provider-scoped admin entrypoints: `crabbox admin providers identity`, `crabbox admin providers policy`, and `crabbox admin hosts` for host lifecycle operations. Existing `admin aws-*` and `admin mac-hosts` commands remain compatibility aliases.
+- Added compatibility aliases `crabbox admin mac-hosts`, `crabbox admin aws-identity`, `crabbox admin aws-policy`, and `crabbox admin aws-policy --mac-hosts` for existing AWS macOS operator workflows.
 - Added `scripts/macos-image-lifecycle-smoke.sh` for guarded AWS EC2 Mac host allocation, source macOS lease boot, WebVNC bridge proof, AMI creation, candidate-image smoke, promotion, promoted-image smoke, cleanup, and durable `summary.json` evidence.
 - Added a no-spend macOS host region preflight helper for checking reusable EC2 Mac Dedicated Hosts, dry-run allocation readiness, and Dedicated Mac host quota across configured AWS regions before approving paid allocation.
 - Added macOS image lifecycle evidence files for host discovery, quota, dry-run, allocation, image creation, image promotion, warmup, host wait, WebVNC daemon startup, WebVNC status, and artifact directories for blocked, partial, and completed runs.
 - Added provider-neutral `CRABBOX_HOST_ID` / `hostId` config for host-pinned leases while keeping `CRABBOX_AWS_MAC_HOST_ID` / `aws.macHostId` as AWS compatibility aliases.
-- Added provider-scoped admin entrypoints: `crabbox admin providers identity`, `crabbox admin providers policy`, and `crabbox admin hosts` for host lifecycle operations. Existing `admin aws-*` and `admin mac-hosts` commands remain compatibility aliases.
 - Added provider-neutral coordinator admin routes for host lifecycle and provider identity operations, while keeping the legacy AWS routes as compatibility fallbacks.
 - Added an account-guarded macOS image lifecycle IAM apply helper for trusted operators remediating coordinator AWS permissions from smoke artifacts, including automatic local AWS profile matching.
-- Added parsed IAM policy target details to `crabbox admin aws-identity --json` so operators know which role or user needs the macOS image lifecycle policy.
+- Added parsed IAM policy target details to `crabbox admin providers identity --provider aws --json` so operators know which role or user needs the macOS image lifecycle policy.
 - Added regression coverage for the guarded macOS image lifecycle smoke and configurable WebVNC post-start grace period.
 - Added a broker-side AWS orphan sweep that periodically scans configured AWS capacity regions from the Durable Object alarm and can terminate confirmed Crabbox-tagged EC2 orphans.
 - Added AWS macOS support to native `crabbox checkpoint` snapshot/image creation and forks, including host-pin metadata and On-Demand fork defaults.

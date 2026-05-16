@@ -212,13 +212,6 @@ Common Flows:
   crabbox admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2.metal
   crabbox admin hosts list --provider aws --target macos --region eu-west-1
   crabbox admin hosts allocate --provider aws --target macos --region eu-west-1 --dry-run
-  crabbox admin aws-identity --region eu-west-1
-  crabbox admin aws-policy
-  crabbox admin mac-hosts policy
-  crabbox admin mac-hosts offerings --region eu-west-1
-  crabbox admin mac-hosts quota --region eu-west-1 --type mac2.metal
-  crabbox admin mac-hosts list --region eu-west-1
-  crabbox admin mac-hosts allocate --region eu-west-1 --dry-run
   crabbox warmup --actions-runner
   crabbox actions hydrate --id blue-lobster
   crabbox actions dispatch -f testbox_id=cbx_abcdef123456

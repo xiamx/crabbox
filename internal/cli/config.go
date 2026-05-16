@@ -13,92 +13,93 @@ import (
 )
 
 type Config struct {
-	Profile             string
-	Provider            string
-	TargetOS            string
-	WindowsMode         string
-	Desktop             bool
-	Browser             bool
-	Code                bool
-	Network             NetworkMode
-	Class               string
-	ServerType          string
-	ServerTypeExplicit  bool
-	Coordinator         string
-	CoordToken          string
-	CoordAdminToken     string
-	Access              AccessConfig
-	Location            string
-	Image               string
-	AWSRegion           string
-	AWSAMI              string
-	AWSSnapshot         string
-	AWSSGID             string
-	AWSSubnetID         string
-	AWSProfile          string
-	AWSRootGB           int32
-	AWSSSHCIDRs         []string
-	AWSMacHostID        string
-	AzureSubscription   string
-	AzureTenant         string
-	AzureClientID       string
-	AzureLocation       string
-	AzureResourceGroup  string
-	AzureImage          string
-	AzureSnapshot       string
-	AzureOSDisk         string
+	Profile            string
+	Provider           string
+	TargetOS           string
+	WindowsMode        string
+	Desktop            bool
+	Browser            bool
+	Code               bool
+	Network            NetworkMode
+	Class              string
+	ServerType         string
+	ServerTypeExplicit bool
+	Coordinator        string
+	CoordToken         string
+	CoordAdminToken    string
+	Access             AccessConfig
+	Location           string
+	Image              string
+	AWSRegion          string
+	AWSAMI             string
+	AWSSnapshot        string
+	AWSSGID            string
+	AWSSubnetID        string
+	AWSProfile         string
+	AWSRootGB          int32
+	AWSSSHCIDRs        []string
+	AWSMacHostID       string
+	AzureSubscription  string
+	AzureTenant        string
+	AzureClientID      string
+	AzureLocation      string
+	AzureResourceGroup string
+	AzureImage         string
+	AzureSnapshot      string
+	AzureOSDisk        string
 	AzureOSDiskExplicit bool
-	AzureVNet           string
-	AzureSubnet         string
-	AzureNSG            string
-	AzureSSHCIDRs       []string
-	AzureNetwork        string
-	GCPProject          string
-	gcpProjectExplicit  bool
-	GCPZone             string
-	gcpZoneExplicit     bool
-	GCPImage            string
-	gcpImageExplicit    bool
-	GCPMachineImage     string
-	GCPSnapshot         string
-	GCPNetwork          string
-	gcpNetworkExplicit  bool
-	GCPSubnet           string
-	GCPTags             []string
-	gcpTagsExplicit     bool
-	GCPSSHCIDRs         []string
-	GCPRootGB           int64
-	gcpRootGBExplicit   bool
-	GCPServiceAccount   string
-	Proxmox             ProxmoxConfig
-	SSHUser             string
-	SSHKey              string
-	SSHPort             string
-	SSHFallbackPorts    []string
-	ProviderKey         string
-	WorkRoot            string
-	TTL                 time.Duration
-	IdleTimeout         time.Duration
-	Sync                SyncConfig
-	Run                 RunConfig
-	EnvAllow            []string
-	Capacity            CapacityConfig
-	Actions             ActionsConfig
-	Blacksmith          BlacksmithConfig
-	Namespace           NamespaceConfig
-	Daytona             DaytonaConfig
-	E2B                 E2BConfig
-	Islo                IsloConfig
-	Tensorlake          TensorlakeConfig
-	Modal               ModalConfig
-	Cloudflare          CloudflareConfig
-	Semaphore           SemaphoreConfig
-	Sprites             SpritesConfig
-	Tailscale           TailscaleConfig
-	Static              StaticConfig
-	Results             ResultsConfig
-	Cache               CacheConfig
-	Jobs                map[string]JobConfig
+	AzureVNet          string
+	AzureSubnet        string
+	AzureNSG           string
+	AzureSSHCIDRs      []string
+	AzureNetwork       string
+	GCPProject         string
+	gcpProjectExplicit bool
+	GCPZone            string
+	gcpZoneExplicit    bool
+	GCPImage           string
+	gcpImageExplicit   bool
+	GCPMachineImage    string
+	GCPSnapshot        string
+	GCPNetwork         string
+	gcpNetworkExplicit bool
+	GCPSubnet          string
+	GCPTags            []string
+	gcpTagsExplicit    bool
+	GCPSSHCIDRs        []string
+	GCPRootGB          int64
+	gcpRootGBExplicit  bool
+	GCPServiceAccount  string
+	Proxmox            ProxmoxConfig
+	OVH                OVHConfig
+	SSHUser            string
+	SSHKey             string
+	SSHPort            string
+	SSHFallbackPorts   []string
+	ProviderKey        string
+	WorkRoot           string
+	TTL                time.Duration
+	IdleTimeout        time.Duration
+	Sync               SyncConfig
+	Run                RunConfig
+	EnvAllow           []string
+	Capacity           CapacityConfig
+	Actions            ActionsConfig
+	Blacksmith         BlacksmithConfig
+	Namespace          NamespaceConfig
+	Daytona            DaytonaConfig
+	E2B                E2BConfig
+	Islo               IsloConfig
+	Tensorlake         TensorlakeConfig
+	Modal              ModalConfig
+	Cloudflare         CloudflareConfig
+	Semaphore          SemaphoreConfig
+	Sprites            SpritesConfig
+	Tailscale          TailscaleConfig
+	Static             StaticConfig
+	Results            ResultsConfig
+	Cache              CacheConfig
+	Jobs               map[string]JobConfig
 }
 
 type SyncConfig struct {
@@ -237,6 +238,18 @@ type ProxmoxConfig struct {
 	WorkRoot    string
 	FullClone   bool
 	InsecureTLS bool
+}
+
+type OVHConfig struct {
+	Endpoint          string
+	ApplicationKey    string
+	ApplicationSecret string
+	ConsumerKey       string
+	ServiceName       string
+	Region            string
+	Image             string
+	SSHCIDRs          []string
+	RootGB            int64
 }
 
 type SemaphoreConfig struct {
@@ -487,6 +500,12 @@ func baseConfig() Config {
 		Sprites: SpritesConfig{
 			APIURL:   "https://api.sprites.dev",
 			WorkRoot: "/home/sprite/crabbox",
+		},
+		OVH: OVHConfig{
+			Endpoint: "ovh-eu",
+			Region:   "GRA11",
+			Image:    "Ubuntu 24.04",
+			RootGB:   400,
 		},
 		Tailscale: TailscaleConfig{
 			Tags:             []string{"tag:crabbox"},
@@ -1790,6 +1809,19 @@ func applyEnv(cfg *Config) {
 	if value, ok := getenvBool("CRABBOX_PROXMOX_INSECURE_TLS"); ok {
 		cfg.Proxmox.InsecureTLS = value
 	}
+	cfg.OVH.Endpoint = getenv("CRABBOX_OVH_ENDPOINT", cfg.OVH.Endpoint)
+	cfg.OVH.ApplicationKey = getenv("CRABBOX_OVH_APPLICATION_KEY", getenv("OVH_APPLICATION_KEY", cfg.OVH.ApplicationKey))
+	cfg.OVH.ApplicationSecret = getenv("CRABBOX_OVH_APPLICATION_SECRET", getenv("OVH_APPLICATION_SECRET", cfg.OVH.ApplicationSecret))
+	cfg.OVH.ConsumerKey = getenv("CRABBOX_OVH_CONSUMER_KEY", getenv("OVH_CONSUMER_KEY", cfg.OVH.ConsumerKey))
+	cfg.OVH.ServiceName = getenv("CRABBOX_OVH_SERVICE_NAME", getenv("OVH_SERVICE_NAME", cfg.OVH.ServiceName))
+	cfg.OVH.Region = getenv("CRABBOX_OVH_REGION", cfg.OVH.Region)
+	cfg.OVH.Image = getenv("CRABBOX_OVH_IMAGE", cfg.OVH.Image)
+	if rootGB := os.Getenv("CRABBOX_OVH_ROOT_GB"); rootGB != "" {
+		cfg.OVH.RootGB = int64(getenvInt("CRABBOX_OVH_ROOT_GB", int(cfg.OVH.RootGB)))
+	}
+	if cidrs := os.Getenv("CRABBOX_OVH_SSH_CIDRS"); cidrs != "" {
+		cfg.OVH.SSHCIDRs = splitCommaList(cidrs)
+	}
 	cfg.SSHUser = getenv("CRABBOX_SSH_USER", cfg.SSHUser)
 	cfg.SSHKey = getenv("CRABBOX_SSH_KEY", cfg.SSHKey)
 	cfg.SSHPort = getenv("CRABBOX_SSH_PORT", cfg.SSHPort)
@@ -2033,6 +2065,9 @@ func serverTypeForConfig(cfg Config) string {
 	if cfg.Provider == "proxmox" {
 		return proxmoxServerTypeForConfig(cfg)
 	}
+	if cfg.Provider == "ovh" {
+		return ovhFlavorCandidatesForClass(cfg.Class)[0]
+	}
 	return serverTypeForClass(cfg.Class)
 }
 
@@ -2069,6 +2104,9 @@ func serverTypeForProviderClass(provider, class string) string {
 	}
 	if provider == "proxmox" {
 		return "template"
+	}
+	if provider == "ovh" {
+		return ovhFlavorCandidatesForClass(class)[0]
 	}
 	return serverTypeForClass(class)
 }
@@ -2215,6 +2253,21 @@ func awsInstanceTypeCandidatesForClass(class string) []string {
 		return []string{"c7a.24xlarge", "c7i.24xlarge", "m7a.24xlarge", "m7i.24xlarge", "r7a.24xlarge", "c7a.16xlarge", "c7a.12xlarge"}
 	case "beast":
 		return []string{"c7a.48xlarge", "c7i.48xlarge", "m7a.48xlarge", "m7i.48xlarge", "r7a.48xlarge", "c7a.32xlarge", "c7i.32xlarge", "m7a.32xlarge", "c7a.24xlarge", "c7a.16xlarge"}
+	default:
+		return []string{class}
+	}
+}
+
+func ovhFlavorCandidatesForClass(class string) []string {
+	switch class {
+	case "standard":
+		return []string{"b3-8", "b2-7"}
+	case "fast":
+		return []string{"b3-32", "b2-30", "c3-32"}
+	case "large":
+		return []string{"b3-64", "b2-60", "c3-64"}
+	case "beast":
+		return []string{"b3-128", "b2-120", "c3-128"}
 	default:
 		return []string{class}
 	}

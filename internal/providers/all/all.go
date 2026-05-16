@@ -12,6 +12,7 @@ import (
 	_ "github.com/openclaw/crabbox/internal/providers/islo"
 	_ "github.com/openclaw/crabbox/internal/providers/modal"
 	_ "github.com/openclaw/crabbox/internal/providers/namespace"
+	_ "github.com/openclaw/crabbox/internal/providers/ovh"
 	_ "github.com/openclaw/crabbox/internal/providers/proxmox"
 	_ "github.com/openclaw/crabbox/internal/providers/semaphore"
 	_ "github.com/openclaw/crabbox/internal/providers/sprites"

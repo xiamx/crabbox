@@ -18,6 +18,7 @@ require (
 	github.com/daytonaio/daytona/libs/api-client-go v0.173.0
 	github.com/daytonaio/daytona/libs/sdk-go v0.173.0
 	github.com/islo-labs/go-sdk v0.0.0-20260506134022-b0def8020123
+	github.com/ovh/go-ovh v1.9.0
 	google.golang.org/api v0.278.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -81,4 +82,5 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
+	gopkg.in/ini.v1 v1.67.0 // indirect
 )

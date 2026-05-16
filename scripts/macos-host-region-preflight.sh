@@ -4,7 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRABBOX_BIN="${CRABBOX_BIN:-$ROOT/bin/crabbox}"
 
-instance_type="${CRABBOX_MACOS_TYPE:-mac2.metal}"
+if [[ -n "${CRABBOX_MACOS_TYPE:-}" ]]; then
+  types_raw="$CRABBOX_MACOS_TYPE"
+else
+  types_raw="${CRABBOX_MACOS_TYPES:-mac2.metal,mac1.metal}"
+fi
 regions_raw="${CRABBOX_MACOS_REGIONS:-${CRABBOX_CAPACITY_REGIONS:-${CRABBOX_MACOS_REGION:-eu-west-1}}}"
 
 need() {
@@ -29,9 +33,19 @@ if [[ "${#regions[@]}" -eq 0 ]]; then
   exit 2
 fi
 
+instance_types=()
+while IFS= read -r candidate_type; do
+  instance_types+=("$candidate_type")
+done < <(printf '%s\n' "$types_raw" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF && !seen[$0]++')
+if [[ "${#instance_types[@]}" -eq 0 ]]; then
+  printf 'no macOS instance types configured\n' >&2
+  exit 2
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
+for instance_type in "${instance_types[@]}"; do
 for region in "${regions[@]}"; do
   list_status=0
   list_output="$("$CRABBOX_BIN" admin mac-hosts list --region "$region" --type "$instance_type" --json 2>&1)" || list_status=$?
@@ -87,20 +101,28 @@ for region in "${regions[@]}"; do
       }
     }' >>"$tmp"
 done
+done
+
+instance_types_json="$(printf '%s\n' "${instance_types[@]}" | jq -R . | jq -s .)"
 
 summary="$(
-  jq -s --arg instanceType "$instance_type" '
+  jq -s --argjson instanceTypes "$instance_types_json" '
     def first_existing: [ .[] | select(.existingHost != null) ][0] // null;
     def first_ready_allocation: [ .[] | select(.dryRun.ok == true and .quota.ok == true) ][0] // null;
     . as $regions |
     (first_existing) as $existing |
     (first_ready_allocation) as $ready |
+    (if $existing != null then $existing.instanceType
+     elif $ready != null then $ready.instanceType
+     else null end) as $selectedType |
     {
       result:
         (if $existing != null then "ready-existing-host"
          elif $ready != null then "ready-allocation"
          else "blocked" end),
-      instanceType: $instanceType,
+      instanceType: ($selectedType // $instanceTypes[0]),
+      selectedInstanceType: $selectedType,
+      instanceTypes: $instanceTypes,
       selectedRegion:
         (if $existing != null then $existing.region
          elif $ready != null then $ready.region
@@ -109,7 +131,7 @@ summary="$(
         (if $existing != null then $existing.existingHost else null end),
       blocker:
         (if $existing == null and $ready == null then {
-          message: "no configured region has an available EC2 Mac Dedicated Host or quota-backed no-spend allocation dry-run",
+          message: "no configured region/type has an available EC2 Mac Dedicated Host or quota-backed no-spend allocation dry-run",
           remediation: "Apply crabbox admin aws-policy --mac-hosts to the coordinator AWS identity, verify regional EC2 Mac Dedicated Host quota, then rerun this preflight before paid allocation."
         } else null end),
       regions: $regions

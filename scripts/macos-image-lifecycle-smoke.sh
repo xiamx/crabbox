@@ -489,9 +489,13 @@ select_region_from_preflight() {
 
   summary_phase="region-preflight"
   set +e
-  CRABBOX_BIN="$CRABBOX_BIN" \
-    CRABBOX_MACOS_TYPE="$instance_type" \
-    "$region_preflight_script" >"$region_preflight_log" 2>"${region_preflight_log}.stderr"
+  if [[ -n "${CRABBOX_MACOS_TYPE:-}" ]]; then
+    env "CRABBOX_BIN=$CRABBOX_BIN" "CRABBOX_MACOS_TYPE=$instance_type" \
+      "$region_preflight_script" >"$region_preflight_log" 2>"${region_preflight_log}.stderr"
+  else
+    env "CRABBOX_BIN=$CRABBOX_BIN" \
+      "$region_preflight_script" >"$region_preflight_log" 2>"${region_preflight_log}.stderr"
+  fi
   local status=$?
   set -e
   cat "$region_preflight_log"
@@ -518,6 +522,12 @@ select_region_from_preflight() {
     exit 1
   fi
   region="$selected_region"
+
+  local selected_type
+  selected_type="$(jq -r '.selectedInstanceType // .instanceType // empty' "$region_preflight_log")"
+  if [[ -n "$selected_type" ]]; then
+    instance_type="$selected_type"
+  fi
 }
 
 mac_host_state() {

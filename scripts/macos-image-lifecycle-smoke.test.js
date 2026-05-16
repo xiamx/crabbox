@@ -22,10 +22,14 @@ state_dir="\${CRABBOX_FAKE_STATE:?}"
 mkdir -p "$state_dir"
 printf '%s\\n' "$*" >>"$log"
 region="eu-west-1"
+type="mac2.metal"
 for ((i = 1; i <= $#; i++)); do
   if [[ "\${!i}" == "--region" ]]; then
     next=$((i + 1))
     region="\${!next}"
+  elif [[ "\${!i}" == "--type" ]]; then
+    next=$((i + 1))
+    type="\${!next}"
   fi
 done
 
@@ -45,39 +49,39 @@ if [[ "$1" == "admin" && "$2" == "mac-hosts" ]]; then
       ;;
     offerings)
       if [[ "\${CRABBOX_FAKE_OFFERINGS_404:-0}" == "1" ]]; then
-        printf 'coordinator GET /v1/admin/mac-hosts/offerings?region=%s&type=mac2.metal: http 404: {"error":"not_found"}\\n' "$region" >&2
+        printf 'coordinator GET /v1/admin/mac-hosts/offerings?region=%s&type=%s: http 404: {"error":"not_found"}\\n' "$region" "$type" >&2
         exit 1
       fi
-      printf '%s    %sa     mac2.metal\\n' "$region" "$region"
+      printf '%s    %sa     %s\\n' "$region" "$region" "$type"
       ;;
     quota)
       if [[ "\${CRABBOX_FAKE_QUOTA_FAIL:-0}" == "1" ]]; then
-        printf 'coordinator GET /v1/admin/mac-hosts/quota?region=%s&type=mac2.metal: http 502: {"error":"mac_host_quota_failed","message":"AWS authorization failure: coordinator AWS identity needs servicequotas:ListServiceQuotas to inspect EC2 Mac Dedicated Host quotas"}\\n' "$region" >&2
+        printf 'coordinator GET /v1/admin/mac-hosts/quota?region=%s&type=%s: http 502: {"error":"mac_host_quota_failed","message":"AWS authorization failure: coordinator AWS identity needs servicequotas:ListServiceQuotas to inspect EC2 Mac Dedicated Host quotas"}\\n' "$region" "$type" >&2
         exit 1
       fi
-      printf '[{"serviceCode":"ec2","quotaCode":"L-MAC2","quotaName":"Running Dedicated mac2 Hosts","value":%s,"adjustable":true,"globalQuota":false,"unit":"None"}]\\n' "\${CRABBOX_FAKE_QUOTA_VALUE:-1}"
+      printf '[{"serviceCode":"ec2","quotaCode":"L-MAC","quotaName":"Running Dedicated %s Hosts","value":%s,"adjustable":true,"globalQuota":false,"unit":"None"}]\\n' "\${type%.metal}" "\${CRABBOX_FAKE_QUOTA_VALUE:-1}"
       ;;
     list)
-      if [[ "\${CRABBOX_FAKE_EXISTING_REGION:-}" == "$region" ]]; then
-        printf '[{"id":"h-existing","instanceType":"mac2.metal","state":"available","region":"%s"}]\\n' "$region"
+      if [[ "\${CRABBOX_FAKE_EXISTING_REGION:-}" == "$region" && "\${CRABBOX_FAKE_EXISTING_TYPE:-mac2.metal}" == "$type" ]]; then
+        printf '[{"id":"h-existing","instanceType":"%s","state":"available","region":"%s"}]\\n' "$type" "$region"
       elif [[ "\${CRABBOX_FAKE_NO_HOST:-0}" == "1" && ! -f "$state_dir/host" ]]; then
         printf '[]\\n'
       else
-        printf '[{"id":"h-mock","instanceType":"mac2.metal","state":"available"}]\\n'
+        printf '[{"id":"h-mock","instanceType":"%s","state":"available"}]\\n' "$type"
       fi
       ;;
     allocate)
       if [[ " $* " == *" --dry-run "* ]]; then
-        if [[ -n "\${CRABBOX_FAKE_DRY_REGION:-}" && "\${CRABBOX_FAKE_DRY_REGION:-}" != "$region" ]]; then
-          printf '[{"region":"%s","availabilityZone":"%sa","instanceType":"mac2.metal","ok":false,"message":"UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions, including ec2:AllocateHosts and ec2:CreateTags"}]\\n' "$region" "$region"
+        if [[ -n "\${CRABBOX_FAKE_DRY_REGION:-}" && ("\${CRABBOX_FAKE_DRY_REGION:-}" != "$region" || "\${CRABBOX_FAKE_DRY_TYPE:-mac2.metal}" != "$type") ]]; then
+          printf '[{"region":"%s","availabilityZone":"%sa","instanceType":"%s","ok":false,"message":"UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions, including ec2:AllocateHosts and ec2:CreateTags"}]\\n' "$region" "$region" "$type"
         elif [[ "\${CRABBOX_FAKE_DRY_RUN:-allow}" == "deny" ]]; then
-          printf '[{"region":"%s","availabilityZone":"%sa","instanceType":"mac2.metal","ok":false,"message":"UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions, including ec2:AllocateHosts and ec2:CreateTags"}]\\n' "$region" "$region"
+          printf '[{"region":"%s","availabilityZone":"%sa","instanceType":"%s","ok":false,"message":"UnauthorizedOperation: coordinator AWS identity needs EC2 Mac host lifecycle permissions, including ec2:AllocateHosts and ec2:CreateTags"}]\\n' "$region" "$region" "$type"
         else
-          printf '[{"region":"%s","availabilityZone":"%sa","instanceType":"mac2.metal","ok":true,"message":"DryRunOperation"}]\\n' "$region" "$region"
+          printf '[{"region":"%s","availabilityZone":"%sa","instanceType":"%s","ok":true,"message":"DryRunOperation"}]\\n' "$region" "$region" "$type"
         fi
       else
         : >"$state_dir/host"
-        printf '[{"id":"h-mock","instanceType":"mac2.metal","state":"available"}]\\n'
+        printf '[{"id":"h-mock","instanceType":"%s","state":"available"}]\\n' "$type"
       fi
       ;;
     release)
@@ -336,6 +340,34 @@ test("macOS lifecycle smoke selects a dry-run-ready configured region before pai
   assert.match(fakeLog, /^admin mac-hosts allocate --region eu-west-1 --type mac2\.metal --dry-run --json$/m);
   assert.match(fakeLog, /^admin mac-hosts allocate --region us-west-2 --type mac2\.metal --dry-run --json$/m);
   assert.match(fakeLog, /^admin mac-hosts quota --region us-west-2 --type mac2\.metal --json$/m);
+});
+
+test("macOS lifecycle smoke adopts the type selected by region preflight", async () => {
+  const run = await setupRun();
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_FAKE_NO_HOST: "1",
+    CRABBOX_FAKE_DRY_REGION: "us-west-2",
+    CRABBOX_FAKE_DRY_TYPE: "mac1.metal",
+    CRABBOX_MACOS_REGIONS: "eu-west-1,us-west-2",
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "type-selected",
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const summary = await readJSON(path.join(run.artifacts, "summary.json"));
+  assert.equal(summary.result, "ready");
+  assert.equal(summary.phase, "allocation");
+  assert.equal(summary.region, "us-west-2");
+  assert.equal(summary.instanceType, "mac1.metal");
+  await assertFileContains(summary.evidence.regionPreflight, /"selectedInstanceType": "mac1.metal"/);
+
+  const fakeLog = await readFile(run.fakeLog, "utf8");
+  assert.match(fakeLog, /^admin mac-hosts allocate --region us-west-2 --type mac1\.metal --dry-run --json$/m);
+  assert.match(fakeLog, /^admin mac-hosts quota --region us-west-2 --type mac1\.metal --json$/m);
 });
 
 test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () => {

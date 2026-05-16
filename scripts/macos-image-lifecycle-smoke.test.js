@@ -234,6 +234,9 @@ test("macOS lifecycle smoke writes a blocked IAM summary before paid work", asyn
   assert.deepEqual(summary.blocker.commands, [
     `${run.fake} admin aws-identity --region eu-west-1`,
     `${run.fake} admin aws-policy --mac-hosts`,
+    `coordinator_account=$(${run.fake} admin aws-identity --region eu-west-1 --json | jq -r .account)`,
+    "local_account=$(aws sts get-caller-identity --query Account --output text)",
+    'test "$local_account" = "$coordinator_account"',
     `${run.fake} admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run --json`,
   ]);
   await assertFileContains(summary.evidence.awsProviderPolicy, /ec2:RunInstances/);
@@ -281,6 +284,9 @@ test("macOS lifecycle smoke preserves quota IAM evidence when dry-run is also bl
   assert.deepEqual(summary.blocker.commands, [
     `${run.fake} admin aws-identity --region eu-west-1`,
     `${run.fake} admin aws-policy --mac-hosts`,
+    `coordinator_account=$(${run.fake} admin aws-identity --region eu-west-1 --json | jq -r .account)`,
+    "local_account=$(aws sts get-caller-identity --query Account --output text)",
+    'test "$local_account" = "$coordinator_account"',
     `${run.fake} admin mac-hosts quota --region eu-west-1 --type mac2.metal --json`,
     `${run.fake} admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run --json`,
   ]);

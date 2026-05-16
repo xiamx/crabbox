@@ -108,6 +108,9 @@ set_host_iam_remediation() {
   blocker_commands="$(printf '%s\n' \
     "$CRABBOX_BIN admin aws-identity --region $region" \
     "$CRABBOX_BIN admin aws-policy --mac-hosts" \
+    "coordinator_account=\$($CRABBOX_BIN admin aws-identity --region $region --json | jq -r .account)" \
+    "local_account=\$(aws sts get-caller-identity --query Account --output text)" \
+    "test \"\$local_account\" = \"\$coordinator_account\"" \
     "$CRABBOX_BIN admin mac-hosts allocate --region $region --type $instance_type --dry-run --json")"
 }
 
@@ -116,6 +119,9 @@ set_quota_iam_remediation() {
   blocker_commands="$(printf '%s\n' \
     "$CRABBOX_BIN admin aws-identity --region $region" \
     "$CRABBOX_BIN admin aws-policy --mac-hosts" \
+    "coordinator_account=\$($CRABBOX_BIN admin aws-identity --region $region --json | jq -r .account)" \
+    "local_account=\$(aws sts get-caller-identity --query Account --output text)" \
+    "test \"\$local_account\" = \"\$coordinator_account\"" \
     "$CRABBOX_BIN admin mac-hosts quota --region $region --type $instance_type --json")"
 }
 
@@ -124,6 +130,9 @@ set_host_and_quota_iam_remediation() {
   blocker_commands="$(printf '%s\n' \
     "$CRABBOX_BIN admin aws-identity --region $region" \
     "$CRABBOX_BIN admin aws-policy --mac-hosts" \
+    "coordinator_account=\$($CRABBOX_BIN admin aws-identity --region $region --json | jq -r .account)" \
+    "local_account=\$(aws sts get-caller-identity --query Account --output text)" \
+    "test \"\$local_account\" = \"\$coordinator_account\"" \
     "$CRABBOX_BIN admin mac-hosts quota --region $region --type $instance_type --json" \
     "$CRABBOX_BIN admin mac-hosts allocate --region $region --type $instance_type --dry-run --json")"
 }
@@ -507,6 +516,9 @@ select_region_from_preflight() {
     blocker_commands="$(printf '%s\n' \
       "$CRABBOX_BIN admin aws-identity --region $region" \
       "$CRABBOX_BIN admin aws-policy --mac-hosts" \
+      "coordinator_account=\$($CRABBOX_BIN admin aws-identity --region $region --json | jq -r .account)" \
+      "local_account=\$(aws sts get-caller-identity --query Account --output text)" \
+      "test \"\$local_account\" = \"\$coordinator_account\"" \
       "$region_preflight_script")"
     printf 'macOS lifecycle blocked before paid work: %s\n' "$blocker_message" >&2
     write_summary blocked region-preflight

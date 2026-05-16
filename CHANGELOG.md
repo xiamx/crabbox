@@ -17,6 +17,7 @@
 - Documented the concrete IAM remediation commands for attaching the combined macOS image lifecycle policy to the coordinator AWS role or user.
 - Documented the AWS account-match preflight for macOS image lifecycle IAM remediation so operators do not attach the policy from the wrong local profile.
 - Added parsed IAM policy target details to `crabbox admin aws-identity --json` so operators know which role or user needs the macOS image lifecycle policy.
+- Added AWS account-match commands to blocked macOS image lifecycle summaries so artifact-driven IAM remediation does not target the wrong local profile.
 - Fixed the macOS image lifecycle smoke so Mac host quota preflight failures are preserved as evidence even when EC2 Mac host dry-run is also blocked.
 - Fixed the macOS image lifecycle smoke so combined quota and EC2 Mac host dry-run IAM blockers include rerun commands for both preflights.
 - Added a no-spend macOS host region preflight helper for checking reusable EC2 Mac Dedicated Hosts, dry-run allocation readiness, and Dedicated Mac host quota across configured regions.
